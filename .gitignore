@@ -1,0 +1,76 @@
+# 系統和個人文件
+.bash_history
+.bash_logout
+.bashrc
+.profile
+.viminfo
+.lesshst
+.sudo_as_admin_successful
+.wget-hsts
+.Xauthority
+.xsessionrc
+
+# 系統目錄
+.cache/
+.config/
+.gnupg/
+.local/
+.ros/
+.rviz2/
+.cursor/
+.cursor-server/
+
+# ROS2 編譯產物
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系統文件
+.DS_Store
+Thumbs.db
+
+# 臨時文件
+*.tmp
+*.log
+*.bak
+
+# 編譯文件
+*.o
+*.a
+*.dylib
+*.dll
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# 其他
+*.orig
+*.rej
+
+# 用戶目錄（可選，如果需要包含可以移除）
+# Desktop/
+# Documents/
+# Downloads/
+# Music/
+# Pictures/
+# Public/
+# Templates/
+# Videos/
+

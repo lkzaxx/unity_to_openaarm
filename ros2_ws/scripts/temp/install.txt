@@ -1,0 +1,64 @@
+1.安装ros===================
+# 确保 Universe 仓库已启用
+sudo apt install software-properties-common
+sudo add-apt-repository universe
+
+# 添加 ROS 2 GPG 密钥
+sudo apt update && sudo apt install curl
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+# 添加 ROS 2 仓库
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# 更新软件包索引
+sudo apt update
+
+# 安装完整版 ROS 2（包含所有包）
+sudo apt install ros-humble-desktop
+
+# 或者安装基础版
+# sudo apt install ros-humble-ros-base
+
+# 每次启动新终端时自动 source ROS 2 环境
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+
+# 立即生效
+source ~/.bashrc
+
+# 安装编译工具
+sudo apt install python3-colcon-common-extensions python3-rosdep2
+
+2.安装canlib===========
+git clone https://github.com/enactic/openarm_can.git
+cd openarm_can
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+sudo cmake --install build
+
+
+3.安装 robot description
+git clone https://github.com/enactic/openarm_ros2 ~/ros2_ws/src/openarm_ros2
+git clone https://github.com/enactic/openarm_description.git ~/ros2_ws/src/openarm_description
+
+sudo apt install ros-humble-xacro
+
+# Basic single arm with hand
+xacro $ROS_WS/src/openarm_description/urdf/robot/v10.urdf.xacro arm_type:=v10 bimanual:=false > openarm_single.urdf
+
+# Single arm without end-effector
+xacro $ROS_WS/src/openarm_description/urdf/robot/v10.urdf.xacro arm_type:=v10 bimanual:=false ee_type:=none > openarm_single_no_ee.urdf
+
+# Single arm with ROS2 control
+xacro $ROS_WS/src/openarm_description/urdf/robot/v10.urdf.xacro arm_type:=v10 bimanual:=false ros2_control:=true can_interface:=can0 > openarm_single_control.urdf
+
+# Basic bimanual setup
+xacro $ROS_WS/src/openarm_description/urdf/robot/v10.urdf.xacro arm_type:=v10 bimanual:=true > openarm_bimanual.urdf
+
+# Bimanual with ROS2 control
+xacro $ROS_WS/src/openarm_description/urdf/robot/v10.urdf.xacro arm_type:=v10 bimanual:=true ros2_control:=true left_can_interface:=can1 right_can_interface:=can0 > openarm_bimanual_control.urdf
+
+# Bimanual with fake hardware for simulation
+xacro $ROS_WS/src/openarm_description/urdf/robot/v10.urdf.xacro arm_type:=v10 bimanual:=true ros2_control:=true use_fake_hardware:=true > openarm_bimanual_sim.urdf
+
+export ROS_DISTRO=humble
+export ROS_WS=~/ros2_ws
