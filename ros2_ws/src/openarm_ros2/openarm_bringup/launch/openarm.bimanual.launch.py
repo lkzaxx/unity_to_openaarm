@@ -281,5 +281,11 @@ def generate_launch_description():
             delayed_joint_state_broadcaster,
             delayed_robot_controller,
             delayed_gripper_controller,
+            Node(
+                package="openarm_bringup",
+                executable="unity_interface.py",
+                name="unity_interface",
+                output="screen",
+            ),
         ]
     )
