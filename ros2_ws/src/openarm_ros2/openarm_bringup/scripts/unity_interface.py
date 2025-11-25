@@ -74,22 +74,26 @@ class UnityInterface(Node):
         if left_joints:
             traj_msg = self.create_trajectory_msg(left_joints, left_positions)
             self.left_arm_pub.publish(traj_msg)
+            # self.get_logger().info(f'Published Left Arm: {left_positions[0]:.3f}...')
 
         # 發布右臂命令
         if right_joints:
             traj_msg = self.create_trajectory_msg(right_joints, right_positions)
             self.right_arm_pub.publish(traj_msg)
+            # self.get_logger().info(f'Published Right Arm: {right_positions[0]:.3f}...')
 
     def create_trajectory_msg(self, joint_names, positions):
         msg = JointTrajectory()
         msg.header = Header()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        # msg.header.stamp = self.get_clock().now().to_msg() # 使用當前時間
+        # 若不設定 stamp，controller 會立即執行
+        
         msg.joint_names = joint_names
         
         point = JointTrajectoryPoint()
         point.positions = positions
         point.time_from_start.sec = 0
-        point.time_from_start.nanosec = 50000000 # 50ms
+        point.time_from_start.nanosec = 200000000 # 200ms (放寬時間限制，避免因延遲被丟棄)
         
         msg.points.append(point)
         return msg
