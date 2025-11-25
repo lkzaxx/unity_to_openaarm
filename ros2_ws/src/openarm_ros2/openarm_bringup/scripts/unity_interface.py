@@ -3,7 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from std_msgs.msg import Header
+from std_msgs.msg import Header, String
 
 class UnityInterface(Node):
     def __init__(self):
@@ -30,6 +30,13 @@ class UnityInterface(Node):
             self.joint_state_callback,
             10)
 
+        # 訂閱 Unity 心跳 (用於維持連線)
+        self.heartbeat_sub = self.create_subscription(
+            String,
+            '/unity/heartbeat',
+            self.heartbeat_callback,
+            10)
+
         # 發布給 ROS2 Controllers
         self.left_arm_pub = self.create_publisher(
             JointTrajectory,
@@ -47,8 +54,16 @@ class UnityInterface(Node):
             '/openarm/joint_states',
             10)
 
+        # 發布心跳回音
+        self.heartbeat_pub = self.create_publisher(
+            String,
+            '/unity/heartbeat_echo',
+            10)
+
         self.get_logger().info('Unity Interface Node has been started.')
         self.get_logger().info(f'Left Prefix: {self.left_prefix}, Right Prefix: {self.right_prefix}')
+        
+        self.joint_state_count = 0
 
     def listener_callback(self, msg: JointState):
         # 分離左右臂的關節資料
@@ -74,13 +89,13 @@ class UnityInterface(Node):
         if left_joints:
             traj_msg = self.create_trajectory_msg(left_joints, left_positions)
             self.left_arm_pub.publish(traj_msg)
-            # self.get_logger().info(f'Published Left Arm: {left_positions[0]:.3f}...')
+            self.get_logger().info(f'Published Left Arm: {left_positions[0]:.3f}...')
 
         # 發布右臂命令
         if right_joints:
             traj_msg = self.create_trajectory_msg(right_joints, right_positions)
             self.right_arm_pub.publish(traj_msg)
-            # self.get_logger().info(f'Published Right Arm: {right_positions[0]:.3f}...')
+            self.get_logger().info(f'Published Right Arm: {right_positions[0]:.3f}...')
 
     def create_trajectory_msg(self, joint_names, positions):
         msg = JointTrajectory()
@@ -97,6 +112,12 @@ class UnityInterface(Node):
         
         msg.points.append(point)
         return msg
+
+    def heartbeat_callback(self, msg: String):
+        # 回傳心跳，讓 Unity 知道連線還活著
+        echo_msg = String()
+        echo_msg.data = msg.data
+        self.heartbeat_pub.publish(echo_msg)
 
     def joint_state_callback(self, msg: JointState):
         # 將 ROS2 的 JointState 轉換回 Unity 格式 (可選，如果 Unity 需要顯示)
@@ -135,6 +156,10 @@ class UnityInterface(Node):
         unity_msg.effort = msg.effort
         
         self.unity_state_pub.publish(unity_msg)
+        
+        self.joint_state_count += 1
+        if self.joint_state_count % 100 == 0:
+             self.get_logger().info(f'Relayed JointState to Unity (Count: {self.joint_state_count})')
 
 def main(args=None):
     rclpy.init(args=args)
