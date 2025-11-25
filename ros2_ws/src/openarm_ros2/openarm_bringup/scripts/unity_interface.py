@@ -118,6 +118,7 @@ class UnityInterface(Node):
         echo_msg = String()
         echo_msg.data = msg.data
         self.heartbeat_pub.publish(echo_msg)
+        self.get_logger().info(f'Echoed heartbeat: {msg.data}') # Debug log
 
     def joint_state_callback(self, msg: JointState):
         # 將 ROS2 的 JointState 轉換回 Unity 格式 (可選，如果 Unity 需要顯示)
