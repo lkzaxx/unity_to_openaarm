@@ -176,12 +176,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "right_can_interface",
-            default_value="can2",
+            default_value="can1",
             description="CAN interface to use for the right arm.",
         ),
         DeclareLaunchArgument(
             "left_can_interface",
-            default_value="can1",
+            default_value="can2",
             description="CAN interface to use for the left arm.",
         ),
         DeclareLaunchArgument(
