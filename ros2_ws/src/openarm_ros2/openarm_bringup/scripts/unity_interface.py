@@ -101,6 +101,13 @@ class UnityInterface(Node):
         self.min_trajectory_time = MIN_TRAJECTORY_TIME
         self.current_positions = {}  # 追蹤當前關節位置
 
+        # 位置平滑濾波器（指數移動平均，用於減少目標抖動）
+        # key: 關節名稱（openarm_left_joint1 等）, value: 上一次平滑後的位置
+        self.left_position_filter = {}
+        self.right_position_filter = {}
+        # 平滑係數 α：越小越平滑、反應越慢；越大越貼近原始輸入
+        self.position_smoothing_factor = 0.3
+
         # 夾爪狀態追蹤（避免頻繁發送相同命令）
         self.last_left_gripper_pos = None
         self.last_right_gripper_pos = None
@@ -177,9 +184,15 @@ class UnityInterface(Node):
         if left_joints:
             # 限制位置在安全範圍內
             clamped_positions = self.clamp_joint_positions(left_joints, left_positions)
-            traj_msg = self.create_trajectory_msg(left_joints, clamped_positions)
+            # 🔧 位置平滑：用指數移動平均減少小抖動
+            smoothed_positions = self.smooth_positions(
+                left_joints, clamped_positions, self.left_position_filter
+            )
+            traj_msg = self.create_trajectory_msg(left_joints, smoothed_positions)
             self.left_arm_pub.publish(traj_msg)
-            self.get_logger().info(f"Published Left Arm: {clamped_positions[0]:.3f}...")
+            self.get_logger().info(
+                f"Published Left Arm (smoothed): {smoothed_positions[0]:.3f}..."
+            )
 
         # 發布右臂命令
         if right_joints:
@@ -187,10 +200,14 @@ class UnityInterface(Node):
             clamped_positions = self.clamp_joint_positions(
                 right_joints, right_positions
             )
-            traj_msg = self.create_trajectory_msg(right_joints, clamped_positions)
+            # 🔧 位置平滑：用指數移動平均減少小抖動
+            smoothed_positions = self.smooth_positions(
+                right_joints, clamped_positions, self.right_position_filter
+            )
+            traj_msg = self.create_trajectory_msg(right_joints, smoothed_positions)
             self.right_arm_pub.publish(traj_msg)
             self.get_logger().info(
-                f"Published Right Arm: {clamped_positions[0]:.3f}..."
+                f"Published Right Arm (smoothed): {smoothed_positions[0]:.3f}..."
             )
 
         # 🔥 新增：發送夾爪命令
@@ -293,6 +310,37 @@ class UnityInterface(Node):
                 clamped_positions.append(target_pos)
 
         return clamped_positions
+
+    def smooth_positions(self, joint_names, new_positions, filter_dict):
+        """
+        使用指數移動平均平滑位置命令，減少目標位置的高頻抖動。
+
+        Args:
+            joint_names: 關節名稱列表
+            new_positions: 新的目標位置列表（已做過安全 clamp）
+            filter_dict: 濾波器字典（每個關節儲存上一個平滑後的位置）
+
+        Returns:
+            list: 平滑後的位置列表
+        """
+        alpha = self.position_smoothing_factor
+        smoothed = []
+
+        for i, joint_name in enumerate(joint_names):
+            new_pos = new_positions[i]
+
+            if joint_name in filter_dict:
+                old_pos = filter_dict[joint_name]
+                # 指數移動平均：smoothed = α * new + (1-α) * old
+                smoothed_pos = alpha * new_pos + (1.0 - alpha) * old_pos
+            else:
+                # 第一次出現時，直接使用新的位置
+                smoothed_pos = new_pos
+
+            filter_dict[joint_name] = smoothed_pos
+            smoothed.append(smoothed_pos)
+
+        return smoothed
 
     def create_trajectory_msg(self, joint_names, positions):
         msg = JointTrajectory()
