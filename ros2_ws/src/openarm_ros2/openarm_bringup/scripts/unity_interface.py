@@ -101,6 +101,11 @@ class UnityInterface(Node):
         self.min_trajectory_time = MIN_TRAJECTORY_TIME
         self.current_positions = {}  # 追蹤當前關節位置
 
+        # 每一側最後一次軌跡所使用的「安全執行時間」（秒）
+        # 之後會用它來判斷何時可以啟動下一個軌跡
+        self.last_left_traj_duration = self.min_trajectory_time
+        self.last_right_traj_duration = self.min_trajectory_time
+
         # === 目標平滑功能 ===
         # 位置平滑濾波器（指數移動平均，用於減少目標抖動）
         # key: 關節名稱（openarm_left_joint1 等）, value: 上一次平滑後的位置
@@ -126,8 +131,8 @@ class UnityInterface(Node):
         self.pending_left_target = None
         self.pending_right_target = None
 
-        # 認定「上一筆軌跡已完成」的誤差門檻（當前位置距離 last_target 小於此值）
-        self.motion_done_epsilon = 0.05  # 約 3 度
+        # （保留參數，若未來需要再加入位置誤差判斷，可重新啟用）
+        self.motion_done_epsilon = 0.05  # 目前不再用於判斷完成，只做預留
         # === Unity 心跳檢測功能 ===
         # 是否啟用心跳檢測（True: 必須有心跳才發送軌跡, False: 不檢查心跳）
         self.enable_heartbeat_check = False
@@ -415,10 +420,12 @@ class UnityInterface(Node):
             pending = self.pending_left_target
             last_target = self.last_left_target
             last_send = self.last_left_send_time
+            last_duration = self.last_left_traj_duration
         else:
             pending = self.pending_right_target
             last_target = self.last_right_target
             last_send = self.last_right_send_time
+            last_duration = self.last_right_traj_duration
 
         # 沒有待發目標，直接返回
         if pending is None:
@@ -463,6 +470,7 @@ class UnityInterface(Node):
                 self.left_arm_pub.publish(traj_msg)
                 self.last_left_target = dict(zip(joint_names, positions))
                 self.last_left_send_time = now
+                self.last_left_traj_duration = traj_time
                 self.pending_left_target = None
                 self.get_logger().info(
                     f"✅ [{side}] First trajectory sent: {positions[0]:.3f}..."
@@ -471,6 +479,7 @@ class UnityInterface(Node):
                 self.right_arm_pub.publish(traj_msg)
                 self.last_right_target = dict(zip(joint_names, positions))
                 self.last_right_send_time = now
+                self.last_right_traj_duration = traj_time
                 self.pending_right_target = None
                 self.get_logger().info(
                     f"✅ [{side}] First trajectory sent: {positions[0]:.3f}..."
@@ -478,22 +487,16 @@ class UnityInterface(Node):
 
             return
 
-        # 判斷「上一筆目標」是否大致完成：看 current_positions 與 last_target 的最大誤差
-        max_error = 0.0
-        for name, target_pos in last_target.items():
-            current_pos = self.current_positions.get(name, target_pos)
-            err = abs(current_pos - target_pos)
-            if err > max_error:
-                max_error = err
-
-        # 若還離上一個目標很遠，表示尚未完成 → 先不送新軌跡
-        if max_error > self.motion_done_epsilon:
+        # 已經送過上一筆目標：
+        # 使用「上一筆軌跡的安全執行時間」來判斷是否可以啟動下一筆
+        if time_since_last < last_duration:
             self.get_logger().debug(
-                f"[{side}] Still moving to last target: max_error={max_error:.3f} > epsilon={self.motion_done_epsilon}"
+                f"[{side}] Still within safe trajectory time: {time_since_last:.3f}s < {last_duration:.3f}s"
             )
             return
 
-        # 走到這裡代表：上一筆已大致完成，可以送出 pending 中「最新」目標
+        # 走到這裡代表：已經超過上一筆軌跡的安全執行時間
+        # 可以送出 pending 中「最新」目標作為下一筆軌跡
         joint_names, positions = pending
         traj_time = self.calculate_safe_trajectory_time(joint_names, positions)
         traj_msg = self.create_trajectory_msg(joint_names, positions, traj_time)
@@ -502,17 +505,19 @@ class UnityInterface(Node):
             self.left_arm_pub.publish(traj_msg)
             self.last_left_target = dict(zip(joint_names, positions))
             self.last_left_send_time = now
+            self.last_left_traj_duration = traj_time
             self.pending_left_target = None
             self.get_logger().info(
-                f"✅ [{side}] Next trajectory sent: {positions[0]:.3f}... (prev completed, max_error was {max_error:.3f})"
+                f"✅ [{side}] Next trajectory sent: {positions[0]:.3f}... (waited {time_since_last:.3f}s, last_duration={last_duration:.3f}s)"
             )
         else:
             self.right_arm_pub.publish(traj_msg)
             self.last_right_target = dict(zip(joint_names, positions))
             self.last_right_send_time = now
+            self.last_right_traj_duration = traj_time
             self.pending_right_target = None
             self.get_logger().info(
-                f"✅ [{side}] Next trajectory sent: {positions[0]:.3f}... (prev completed, max_error was {max_error:.3f})"
+                f"✅ [{side}] Next trajectory sent: {positions[0]:.3f}... (waited {time_since_last:.3f}s, last_duration={last_duration:.3f}s)"
             )
 
     def create_trajectory_msg(
@@ -679,9 +684,8 @@ class UnityInterface(Node):
                 f"Relayed JointState to Unity (Count: {self.joint_state_count})"
             )
 
-        # === 在接收到新的實際關節位置後，再次檢查是否可以啟動下一條軌跡 ===
-        self.try_start_next_trajectory("left")
-        self.try_start_next_trajectory("right")
+        # 位置更新目前只用於計算安全執行時間（速度限制），
+        # 是否啟動下一筆軌跡則改由 Unity 訊息觸發的 try_start_next_trajectory 控制
 
 
 def main(args=None):
