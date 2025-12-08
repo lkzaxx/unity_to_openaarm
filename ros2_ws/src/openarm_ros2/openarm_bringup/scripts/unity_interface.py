@@ -114,9 +114,7 @@ class UnityInterface(Node):
         self.last_left_send_time = 0.0
         self.last_right_send_time = 0.0
         # 兩次指令最小間隔（秒），避免過高頻率更新目標
-        self.min_send_interval = 0.3
-        # 與當前實際位置變化小於此門檻時，視為抖動而忽略（單位：rad）
-        self.position_small_delta = 0.05
+        self.min_send_interval = 0.1  # 降低至 0.1 秒，讓第一筆指令更快發出
 
         # 目前已送出的「上一次目標」（用來判斷是否已經到位）
         # key: 關節名稱, value: 目標位置（rad）
@@ -130,6 +128,16 @@ class UnityInterface(Node):
 
         # 認定「上一筆軌跡已完成」的誤差門檻（當前位置距離 last_target 小於此值）
         self.motion_done_epsilon = 0.05  # 約 3 度
+
+        # === Unity 心跳檢測功能 ===
+        # 是否啟用心跳檢測（True: 必須有心跳才發送軌跡, False: 不檢查心跳）
+        self.enable_heartbeat_check = False
+        # 心跳超時時間（秒），超過此時間沒收到心跳視為 Unity 斷線
+        self.heartbeat_timeout = 2.0
+        # 最後一次收到心跳的時間戳
+        self.last_heartbeat_time = 0.0
+        # 是否已經警告過心跳超時（避免重複 log）
+        self.heartbeat_timeout_warned = False
 
         # 夾爪狀態追蹤（避免頻繁發送相同命令）
         self.last_left_gripper_pos = None
@@ -145,6 +153,12 @@ class UnityInterface(Node):
         )
         self.get_logger().info(
             f"Position Safety Factor: {POSITION_SAFETY_FACTOR * 100:.0f}%"
+        )
+        self.get_logger().info(
+            f"Trajectory Queue: min_send_interval={self.min_send_interval}s, motion_done_epsilon={self.motion_done_epsilon}rad"
+        )
+        self.get_logger().info(
+            f"Heartbeat Check: {'ENABLED' if self.enable_heartbeat_check else 'DISABLED'} (timeout={self.heartbeat_timeout}s)"
         )
         self.get_logger().info("Gripper action clients initialized")
 
@@ -173,6 +187,22 @@ class UnityInterface(Node):
                 "upper": hw_limits["upper"] - buffer,
             }
         return limits
+
+    def is_unity_connected(self):
+        """
+        === 檢查 Unity 連線狀態 ===
+        Returns:
+            bool: True 如果 Unity 連線正常（心跳未超時），False 如果超時或未啟用檢測
+        """
+        if not self.enable_heartbeat_check:
+            return True  # 未啟用檢測時，視為永遠連線
+
+        if self.last_heartbeat_time == 0.0:
+            return False  # 從未收到過心跳
+
+        now = self.get_clock().now().nanoseconds / 1e9
+        time_since_heartbeat = now - self.last_heartbeat_time
+        return time_since_heartbeat <= self.heartbeat_timeout
 
     def listener_callback(self, msg: JointState):
         # 分離左右臂的關節資料
@@ -213,6 +243,9 @@ class UnityInterface(Node):
             )
             # 僅更新暫存目標，不立即發送，避免覆蓋正在執行的軌跡
             self.pending_left_target = (left_joints, smoothed_positions)
+            self.get_logger().debug(
+                f"Updated left pending target: {smoothed_positions[0]:.3f}..."
+            )
 
         # === 更新右臂暫存目標（只保留最新一筆） ===
         if right_joints:
@@ -225,6 +258,9 @@ class UnityInterface(Node):
                 right_joints, clamped_positions, self.right_position_filter
             )
             self.pending_right_target = (right_joints, smoothed_positions)
+            self.get_logger().debug(
+                f"Updated right pending target: {smoothed_positions[0]:.3f}..."
+            )
 
         # === 嘗試啟動下一條軌跡（若上一筆已完成） ===
         self.try_start_next_trajectory("left")
@@ -382,11 +418,35 @@ class UnityInterface(Node):
 
         # 沒有待發目標，直接返回
         if pending is None:
+            self.get_logger().debug(f"[{side}] No pending target")
             return
+
+        # === Unity 心跳檢測 ===
+        if self.enable_heartbeat_check:
+            # 如果從未收到過心跳（last_heartbeat_time == 0），不發送軌跡
+            if self.last_heartbeat_time == 0.0:
+                self.get_logger().debug(
+                    f"[{side}] Waiting for first Unity heartbeat..."
+                )
+                return
+
+            # 檢查心跳是否超時
+            time_since_heartbeat = now - self.last_heartbeat_time
+            if time_since_heartbeat > self.heartbeat_timeout:
+                # 只在第一次超時時警告，避免重複 log
+                if not self.heartbeat_timeout_warned:
+                    self.get_logger().warn(
+                        f"⚠️ Unity heartbeat timeout! Last heartbeat: {time_since_heartbeat:.1f}s ago (timeout: {self.heartbeat_timeout}s)"
+                    )
+                    self.heartbeat_timeout_warned = True
+                return
 
         # 最小發送間隔保護
         time_since_last = now - last_send if last_send > 0.0 else 1e6
         if time_since_last < self.min_send_interval:
+            self.get_logger().debug(
+                f"[{side}] Too soon since last send: {time_since_last:.3f}s < {self.min_send_interval}s"
+            )
             return
 
         # 如果還沒有送過任何目標（第一次），可以直接送出 pending
@@ -400,11 +460,17 @@ class UnityInterface(Node):
                 self.last_left_target = dict(zip(joint_names, positions))
                 self.last_left_send_time = now
                 self.pending_left_target = None
+                self.get_logger().info(
+                    f"✅ [{side}] First trajectory sent: {positions[0]:.3f}..."
+                )
             else:
                 self.right_arm_pub.publish(traj_msg)
                 self.last_right_target = dict(zip(joint_names, positions))
                 self.last_right_send_time = now
                 self.pending_right_target = None
+                self.get_logger().info(
+                    f"✅ [{side}] First trajectory sent: {positions[0]:.3f}..."
+                )
 
             return
 
@@ -418,6 +484,9 @@ class UnityInterface(Node):
 
         # 若還離上一個目標很遠，表示尚未完成 → 先不送新軌跡
         if max_error > self.motion_done_epsilon:
+            self.get_logger().debug(
+                f"[{side}] Still moving to last target: max_error={max_error:.3f} > epsilon={self.motion_done_epsilon}"
+            )
             return
 
         # 走到這裡代表：上一筆已大致完成，可以送出 pending 中「最新」目標
@@ -430,11 +499,17 @@ class UnityInterface(Node):
             self.last_left_target = dict(zip(joint_names, positions))
             self.last_left_send_time = now
             self.pending_left_target = None
+            self.get_logger().info(
+                f"✅ [{side}] Next trajectory sent: {positions[0]:.3f}... (prev completed, max_error was {max_error:.3f})"
+            )
         else:
             self.right_arm_pub.publish(traj_msg)
             self.last_right_target = dict(zip(joint_names, positions))
             self.last_right_send_time = now
             self.pending_right_target = None
+            self.get_logger().info(
+                f"✅ [{side}] Next trajectory sent: {positions[0]:.3f}... (prev completed, max_error was {max_error:.3f})"
+            )
 
     def create_trajectory_msg(
         self, joint_names, positions, trajectory_time: float = None
@@ -533,11 +608,23 @@ class UnityInterface(Node):
         )
 
     def heartbeat_callback(self, msg: String):
+        """
+        === Unity 心跳回調 ===
+        收到 Unity 心跳時更新時間戳，並回傳心跳確認。
+        """
+        # 更新最後一次心跳時間
+        self.last_heartbeat_time = self.get_clock().now().nanoseconds / 1e9
+
+        # 如果之前有超時警告，現在收到心跳了，重置標誌並 log
+        if self.heartbeat_timeout_warned:
+            self.get_logger().info("✅ Unity heartbeat restored!")
+            self.heartbeat_timeout_warned = False
+
         # 回傳心跳，讓 Unity 知道連線還活著
         echo_msg = String()
         echo_msg.data = msg.data
         self.heartbeat_pub.publish(echo_msg)
-        self.get_logger().info(f"Echoed heartbeat: {msg.data}")  # Debug log
+        self.get_logger().debug(f"Echoed heartbeat: {msg.data}")
 
     def joint_state_callback(self, msg: JointState):
         # 更新當前位置追蹤（用於速度保護計算）
