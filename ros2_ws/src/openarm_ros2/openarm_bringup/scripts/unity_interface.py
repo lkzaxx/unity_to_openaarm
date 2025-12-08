@@ -128,7 +128,6 @@ class UnityInterface(Node):
 
         # 認定「上一筆軌跡已完成」的誤差門檻（當前位置距離 last_target 小於此值）
         self.motion_done_epsilon = 0.05  # 約 3 度
-
         # === Unity 心跳檢測功能 ===
         # 是否啟用心跳檢測（True: 必須有心跳才發送軌跡, False: 不檢查心跳）
         self.enable_heartbeat_check = False
@@ -138,6 +137,11 @@ class UnityInterface(Node):
         self.last_heartbeat_time = 0.0
         # 是否已經警告過心跳超時（避免重複 log）
         self.heartbeat_timeout_warned = False
+
+        # JointState Relay 訊息 log 開關（避免 log 過多）
+        # True: 每 100 筆 JointState 會印出一次 Relayed JointState 訊息
+        # False: 完全不印出這個統計訊息
+        self.enable_joint_state_log = False
 
         # 夾爪狀態追蹤（避免頻繁發送相同命令）
         self.last_left_gripper_pos = None
@@ -670,7 +674,7 @@ class UnityInterface(Node):
         self.unity_state_pub.publish(unity_msg)
 
         self.joint_state_count += 1
-        if self.joint_state_count % 100 == 0:
+        if self.enable_joint_state_log and self.joint_state_count % 100 == 0:
             self.get_logger().info(
                 f"Relayed JointState to Unity (Count: {self.joint_state_count})"
             )
