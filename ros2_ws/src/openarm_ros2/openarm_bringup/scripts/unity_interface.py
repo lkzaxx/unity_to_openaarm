@@ -108,6 +108,18 @@ class UnityInterface(Node):
         # 平滑係數 α：越小越平滑、反應越慢；越大越貼近原始輸入
         self.position_smoothing_factor = 0.3
 
+        # 軌跡保護狀態：記錄上一條軌跡「預計結束時間」與最後一次發送時間
+        self.last_left_traj_end_time = 0.0
+        self.last_right_traj_end_time = 0.0
+        self.last_left_send_time = 0.0
+        self.last_right_send_time = 0.0
+
+        # 軌跡保護參數
+        # - min_send_interval: 兩次指令最小間隔（秒），避免過高頻率更新目標
+        # - position_small_delta: 與當前實際位置變化小於此門檻時，視為抖動而忽略（單位：rad）
+        self.min_send_interval = 0.3
+        self.position_small_delta = 0.05
+
         # 夾爪狀態追蹤（避免頻繁發送相同命令）
         self.last_left_gripper_pos = None
         self.last_right_gripper_pos = None
@@ -180,7 +192,7 @@ class UnityInterface(Node):
             elif name == "R_EE":
                 right_gripper_pos = msg.position[i]
 
-        # 發布左臂命令
+        # 發布左臂命令（加入軌跡保護）
         if left_joints:
             # 限制位置在安全範圍內
             clamped_positions = self.clamp_joint_positions(left_joints, left_positions)
@@ -188,13 +200,24 @@ class UnityInterface(Node):
             smoothed_positions = self.smooth_positions(
                 left_joints, clamped_positions, self.left_position_filter
             )
-            traj_msg = self.create_trajectory_msg(left_joints, smoothed_positions)
-            self.left_arm_pub.publish(traj_msg)
-            self.get_logger().info(
-                f"Published Left Arm (smoothed): {smoothed_positions[0]:.3f}..."
+            # 計算這筆指令需要的軌跡時間
+            trajectory_time = self.calculate_safe_trajectory_time(
+                left_joints, smoothed_positions
             )
 
-        # 發布右臂命令
+            # 軌跡保護：上一條沒跑完或變化過小就不送新軌跡
+            if self.should_send_trajectory(
+                "left", left_joints, smoothed_positions, trajectory_time
+            ):
+                traj_msg = self.create_trajectory_msg(
+                    left_joints, smoothed_positions, trajectory_time
+                )
+                self.left_arm_pub.publish(traj_msg)
+                self.get_logger().info(
+                    f"Published Left Arm (smoothed): {smoothed_positions[0]:.3f}..."
+                )
+
+        # 發布右臂命令（加入軌跡保護）
         if right_joints:
             # 限制位置在安全範圍內
             clamped_positions = self.clamp_joint_positions(
@@ -204,11 +227,20 @@ class UnityInterface(Node):
             smoothed_positions = self.smooth_positions(
                 right_joints, clamped_positions, self.right_position_filter
             )
-            traj_msg = self.create_trajectory_msg(right_joints, smoothed_positions)
-            self.right_arm_pub.publish(traj_msg)
-            self.get_logger().info(
-                f"Published Right Arm (smoothed): {smoothed_positions[0]:.3f}..."
+            trajectory_time = self.calculate_safe_trajectory_time(
+                right_joints, smoothed_positions
             )
+
+            if self.should_send_trajectory(
+                "right", right_joints, smoothed_positions, trajectory_time
+            ):
+                traj_msg = self.create_trajectory_msg(
+                    right_joints, smoothed_positions, trajectory_time
+                )
+                self.right_arm_pub.publish(traj_msg)
+                self.get_logger().info(
+                    f"Published Right Arm (smoothed): {smoothed_positions[0]:.3f}..."
+                )
 
         # 🔥 新增：發送夾爪命令
         if left_gripper_pos is not None:
@@ -342,7 +374,69 @@ class UnityInterface(Node):
 
         return smoothed
 
-    def create_trajectory_msg(self, joint_names, positions):
+    def should_send_trajectory(
+        self, side: str, joint_names, target_positions, trajectory_time: float
+    ) -> bool:
+        """
+        軌跡保護邏輯：
+        - 若上一條軌跡預估尚未結束，則不送新軌跡
+        - 若關節與當前實際位置差異太小（小於 position_small_delta），也不送
+        - 並加入最小發送間隔限制，避免過高頻率
+        """
+        now = self.get_clock().now().nanoseconds / 1e9
+
+        if side == "left":
+            last_traj_end = self.last_left_traj_end_time
+            last_send = self.last_left_send_time
+        else:
+            last_traj_end = self.last_right_traj_end_time
+            last_send = self.last_right_send_time
+
+        time_since_last = now - last_send if last_send > 0.0 else 1e6
+
+        # 1) 上一條軌跡還在執行 → 直接略過（等它完成）
+        if now < last_traj_end:
+            self.get_logger().debug(
+                f"{side} arm: previous trajectory still running, skip new command"
+            )
+            return False
+
+        # 2) 計算與當前實際位置的最大差異
+        max_delta = 0.0
+        for i, joint_name in enumerate(joint_names):
+            current_pos = self.current_positions.get(joint_name, target_positions[i])
+            delta = abs(target_positions[i] - current_pos)
+            if delta > max_delta:
+                max_delta = delta
+
+        # 3) 太小的變化（抖動）直接忽略
+        if max_delta < self.position_small_delta:
+            self.get_logger().debug(
+                f"{side} arm: small delta ({max_delta:.3f} rad), ignore to avoid jitter"
+            )
+            return False
+
+        # 4) 最小發送間隔保護
+        if time_since_last < self.min_send_interval:
+            self.get_logger().debug(
+                f"{side} arm: last command {time_since_last:.3f}s ago, below min interval, skip"
+            )
+            return False
+
+        # 允許送出，更新預估結束時間與發送時間
+        end_time = now + max(trajectory_time, self.min_trajectory_time)
+        if side == "left":
+            self.last_left_traj_end_time = end_time
+            self.last_left_send_time = now
+        else:
+            self.last_right_traj_end_time = end_time
+            self.last_right_send_time = now
+
+        return True
+
+    def create_trajectory_msg(
+        self, joint_names, positions, trajectory_time: float = None
+    ):
         msg = JointTrajectory()
         msg.header = Header()
         # msg.header.stamp = self.get_clock().now().to_msg() # 使用當前時間
@@ -351,7 +445,10 @@ class UnityInterface(Node):
         msg.joint_names = joint_names
 
         # 計算安全的軌跡執行時間（基於速度限制）
-        trajectory_time = self.calculate_safe_trajectory_time(joint_names, positions)
+        if trajectory_time is None:
+            trajectory_time = self.calculate_safe_trajectory_time(
+                joint_names, positions
+            )
 
         point = JointTrajectoryPoint()
         point.positions = positions
