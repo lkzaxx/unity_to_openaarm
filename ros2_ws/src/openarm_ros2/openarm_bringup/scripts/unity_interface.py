@@ -21,15 +21,29 @@ HARDWARE_VELOCITY_LIMITS = {
     "DM4310": 30.0,  # Joint 5, 6, 7
 }
 
-# 硬體位置限制 (rad) - 基於 joint_limits.yaml
-HARDWARE_POSITION_LIMITS = {
-    "joint1": {"lower": -1.396263, "upper": 3.490659},
-    "joint2": {"lower": -1.745329, "upper": 1.745329},
-    "joint3": {"lower": -1.570796, "upper": 1.570796},
-    "joint4": {"lower": 0.0, "upper": 2.443461},
-    "joint5": {"lower": -1.570796, "upper": 1.570796},
-    "joint6": {"lower": -0.785398, "upper": 0.785398},
-    "joint7": {"lower": -1.570796, "upper": 1.570796},
+# 硬體位置限制 (rad) - 基於 URDF (openarm_bimanual_control.urdf)
+# 🔥 左右手的 Joint 1, 2 限制不同！
+
+# 右手限制
+RIGHT_HARDWARE_POSITION_LIMITS = {
+    "joint1": {"lower": -1.396263, "upper": 3.490659},   # -80° ~ 200°
+    "joint2": {"lower": -0.174533, "upper": 3.316125},   # -10° ~ 190° (可舉高)
+    "joint3": {"lower": -1.570796, "upper": 1.570796},   # -90° ~ 90°
+    "joint4": {"lower": 0.0, "upper": 2.443461},         # 0° ~ 140°
+    "joint5": {"lower": -1.570796, "upper": 1.570796},   # -90° ~ 90°
+    "joint6": {"lower": -0.785398, "upper": 0.785398},   # -45° ~ 45°
+    "joint7": {"lower": -1.570796, "upper": 1.570796},   # -90° ~ 90°
+}
+
+# 左手限制（Joint 1, 2 與右手相反）
+LEFT_HARDWARE_POSITION_LIMITS = {
+    "joint1": {"lower": -3.490659, "upper": 1.396263},   # -200° ~ 80°
+    "joint2": {"lower": -3.316125, "upper": 0.174533},   # -190° ~ 10° (可舉高)
+    "joint3": {"lower": -1.570796, "upper": 1.570796},   # -90° ~ 90°
+    "joint4": {"lower": 0.0, "upper": 2.443461},         # 0° ~ 140°
+    "joint5": {"lower": -1.570796, "upper": 1.570796},   # -90° ~ 90°
+    "joint6": {"lower": -0.785398, "upper": 0.785398},   # -45° ~ 45°
+    "joint7": {"lower": -1.570796, "upper": 1.570796},   # -90° ~ 90°
 }
 # ============================================================================
 
@@ -94,9 +108,10 @@ class UnityInterface(Node):
         # 當前設定：硬體上限的 30%
         self.joint_velocity_limits = self._calculate_velocity_limits()
 
-        # 關節位置限制 - 使用全域配置自動計算
+        # 關節位置限制 - 區分左右手，使用全域配置自動計算
         # 當前設定：90% 安全範圍（兩端各留 5% 緩衝）
-        self.joint_position_limits = self._calculate_position_limits()
+        self.left_joint_position_limits = self._calculate_position_limits(LEFT_HARDWARE_POSITION_LIMITS)
+        self.right_joint_position_limits = self._calculate_position_limits(RIGHT_HARDWARE_POSITION_LIMITS)
 
         self.min_trajectory_time = MIN_TRAJECTORY_TIME
         self.current_positions = {}  # 追蹤當前關節位置
@@ -185,10 +200,10 @@ class UnityInterface(Node):
             "joint7": HARDWARE_VELOCITY_LIMITS["DM4310"] * VELOCITY_SAFETY_FACTOR,
         }
 
-    def _calculate_position_limits(self):
+    def _calculate_position_limits(self, hw_position_limits):
         """根據全域安全係數計算位置限制（縮小範圍兩端各留緩衝）"""
         limits = {}
-        for joint, hw_limits in HARDWARE_POSITION_LIMITS.items():
+        for joint, hw_limits in hw_position_limits.items():
             range_size = hw_limits["upper"] - hw_limits["lower"]
             buffer = range_size * (1 - POSITION_SAFETY_FACTOR) / 2
             limits[joint] = {
@@ -334,6 +349,7 @@ class UnityInterface(Node):
     def clamp_joint_positions(self, joint_names, positions):
         """
         限制關節位置在安全範圍內，防止超出機械限制
+        🔥 區分左右手使用不同的限制！
 
         Args:
             joint_names: 關節名稱列表
@@ -345,15 +361,21 @@ class UnityInterface(Node):
         clamped_positions = []
 
         for i, joint_name in enumerate(joint_names):
-            # 提取關節編號
+            # 提取關節編號和判斷左右手
             parts = joint_name.split("_")
-            joint_key = parts[-1]
+            joint_key = parts[-1]  # joint1, joint2, etc.
+            
+            # 🔥 根據關節名稱選擇左右手的限制
+            if "left" in joint_name:
+                position_limits = self.left_joint_position_limits
+            else:
+                position_limits = self.right_joint_position_limits
 
             target_pos = positions[i]
 
             # 檢查並限制位置
-            if joint_key in self.joint_position_limits:
-                limits = self.joint_position_limits[joint_key]
+            if joint_key in position_limits:
+                limits = position_limits[joint_key]
                 original_pos = target_pos
 
                 # 限制在上下限範圍內
@@ -362,7 +384,7 @@ class UnityInterface(Node):
                 # 如果位置被限制了，記錄警告
                 if abs(clamped_pos - original_pos) > 0.001:  # 超過 0.001 rad 才警告
                     self.get_logger().warn(
-                        f"{joint_key}: Position clamped from {original_pos:.3f} to {clamped_pos:.3f} "
+                        f"{joint_name}: Position clamped from {original_pos:.3f} to {clamped_pos:.3f} "
                         f'(limits: [{limits["lower"]:.3f}, {limits["upper"]:.3f}])'
                     )
 
