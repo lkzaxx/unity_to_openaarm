@@ -101,7 +101,9 @@ class OpenArm_v10HW : public hardware_interface::SystemInterface {
   const uint32_t DEFAULT_GRIPPER_RECV_CAN_ID = 0x18;
 
   // Default gains
-  const std::vector<double> DEFAULT_KP = {20.0, 20.0, 20.0, 20.0,
+  // Joint 1, 2: 提高 Kp 以增加力矩輸出 (原本 20.0 → 45.0)
+  // 解決手臂無法抬起 90° 的問題
+  const std::vector<double> DEFAULT_KP = {45.0, 45.0, 20.0, 20.0,
                                           5.0,  5.0,  5.0,  0.5};
   const std::vector<double> DEFAULT_KD = {2.75, 2.5, 0.7, 0.4,
                                           0.7,  0.6, 0.5, 0.1};
