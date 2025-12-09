@@ -131,8 +131,8 @@ class UnityInterface(Node):
         self.pending_left_target = None
         self.pending_right_target = None
 
-        # （保留參數，若未來需要再加入位置誤差判斷，可重新啟用）
-        self.motion_done_epsilon = 0.05  # 目前不再用於判斷完成，只做預留
+        # （用於目標變化死區判斷，差異小於此值時不再送出新軌跡）
+        self.motion_done_epsilon = 0.3  # rad
         # === Unity 心跳檢測功能 ===
         # 是否啟用心跳檢測（True: 必須有心跳才發送軌跡, False: 不檢查心跳）
         self.enable_heartbeat_check = False
@@ -496,8 +496,29 @@ class UnityInterface(Node):
             return
 
         # 走到這裡代表：已經超過上一筆軌跡的安全執行時間
-        # 可以送出 pending 中「最新」目標作為下一筆軌跡
+        # 可以送出 pending 中「最新」目標作為下一筆軌跡（若變化足夠大）
         joint_names, positions = pending
+
+        # === 目標變化死區判斷 ===
+        # 若新目標與上一個目標的最大差異小於 motion_done_epsilon，視為變化太小，不送新軌跡。
+        if last_target:
+            max_delta = 0.0
+            for i, name in enumerate(joint_names):
+                prev = last_target.get(name, positions[i])
+                delta = abs(positions[i] - prev)
+                if delta > max_delta:
+                    max_delta = delta
+
+            if max_delta < self.motion_done_epsilon:
+                self.get_logger().debug(
+                    f"[{side}] Skip trajectory: max_delta={max_delta:.4f} < epsilon={self.motion_done_epsilon:.4f}"
+                )
+                if side == "left":
+                    self.pending_left_target = None
+                else:
+                    self.pending_right_target = None
+                return
+
         traj_time = self.calculate_safe_trajectory_time(joint_names, positions)
         traj_msg = self.create_trajectory_msg(joint_names, positions, traj_time)
 
