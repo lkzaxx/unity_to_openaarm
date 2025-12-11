@@ -127,7 +127,7 @@ class UnityInterface(Node):
         self.left_position_filter = {}
         self.right_position_filter = {}
         # 平滑係數 α：越小越平滑、反應越慢；越大越貼近原始輸入
-        self.position_smoothing_factor = 0.3
+        self.position_smoothing_factor = 0.7
 
         # === 軌跡保護與佇列功能 ===
         # 記錄最後一次已送出指令的時間（用於最小間隔保護）
@@ -147,7 +147,7 @@ class UnityInterface(Node):
         self.pending_right_target = None
 
         # （用於目標變化死區判斷，差異小於此值時不再送出新軌跡）
-        self.motion_done_epsilon = 0.3  # rad
+        self.motion_done_epsilon = 0.1  # rad
         # === Unity 心跳檢測功能 ===
         # 是否啟用心跳檢測（True: 必須有心跳才發送軌跡, False: 不檢查心跳）
         self.enable_heartbeat_check = False
