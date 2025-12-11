@@ -261,7 +261,7 @@ hardware_interface::return_type OpenArm_v10HW::write(
   std::vector<openarm::damiao_motor::MITParam> arm_params;
   
   // 重力補償力矩 (Nm) - Joint 1, 2 需要額外力矩來對抗手臂重量
-  constexpr double GRAVITY_COMPENSATION_TORQUE = 8.0;  // 8 Nm
+  constexpr double GRAVITY_COMPENSATION_TORQUE = 12.0;  // 8 Nm
   
   for (size_t i = 0; i < ARM_DOF; ++i) {
     double tau_ff = tau_commands_[i];
