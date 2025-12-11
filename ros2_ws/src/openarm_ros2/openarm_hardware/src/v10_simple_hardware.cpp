@@ -259,9 +259,26 @@ hardware_interface::return_type OpenArm_v10HW::write(
     const rclcpp::Time& /*time*/, const rclcpp::Duration& /*period*/) {
   // Control arm motors with MIT control
   std::vector<openarm::damiao_motor::MITParam> arm_params;
+  
+  // 重力補償力矩 (Nm) - Joint 1, 2 需要額外力矩來對抗手臂重量
+  constexpr double GRAVITY_COMPENSATION_TORQUE = 8.0;  // 8 Nm
+  
   for (size_t i = 0; i < ARM_DOF; ++i) {
+    double tau_ff = tau_commands_[i];
+    
+    // Joint 1, 2 (DM8009 馬達) 增加重力補償
+    // 根據目標位置方向給予正確的補償方向
+    if (i == 0 || i == 1) {
+      // 當目標位置為正值時（抬起方向），給予正向補償
+      if (pos_commands_[i] > 0.1) {
+        tau_ff += GRAVITY_COMPENSATION_TORQUE;
+      } else if (pos_commands_[i] < -0.1) {
+        tau_ff -= GRAVITY_COMPENSATION_TORQUE;
+      }
+    }
+    
     arm_params.push_back({DEFAULT_KP[i], DEFAULT_KD[i], pos_commands_[i],
-                          vel_commands_[i], tau_commands_[i]});
+                          vel_commands_[i], tau_ff});
   }
   openarm_->get_arm().mit_control_all(arm_params);
   // Control gripper if enabled
