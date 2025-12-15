@@ -268,7 +268,7 @@ hardware_interface::return_type OpenArm_v10HW::write(
     
     // Joint 1, 2 (DM8009 馬達) 增加重力補償
     // 根據目標位置方向給予正確的補償方向
-    if (i == 0 || i == 1) {
+    if (i == 0 || i == 1 || i == 4) {
       // 當目標位置為正值時（抬起方向），給予正向補償
       if (pos_commands_[i] > 0.1) {
         tau_ff += GRAVITY_COMPENSATION_TORQUE;
