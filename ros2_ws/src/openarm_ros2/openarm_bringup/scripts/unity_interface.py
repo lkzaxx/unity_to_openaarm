@@ -52,6 +52,12 @@ MAX_ACCELERATION = {
 # 軌跡時間計算參數
 MIN_TRAJECTORY_TIME = 0.05  # 最小軌跡執行時間（秒）
 
+# 死區參數 - 避免微小抖動
+MOTION_DEADZONE = 0.06  # rad，誤差小於此值時停止發送軌跡（約 1°）
+
+# Unity 訊息超時參數
+UNITY_MESSAGE_TIMEOUT = 0.5  # 秒，超過此時間沒收到 Unity 訊息則重置狀態
+
 # 位置安全係數
 POSITION_SAFETY_FACTOR = 0.9  # 使用範圍的百分比（兩端各留 5% 緩衝）
 
@@ -261,6 +267,10 @@ class UnityInterface(Node):
         self.latest_right_targets = {}
         self.has_left_target = False
         self.has_right_target = False
+        
+        # === Unity 訊息時間追蹤 ===
+        self.last_unity_left_time = 0.0
+        self.last_unity_right_time = 0.0
 
         # === 軌跡發送追蹤（防止重疊）===
         self.last_left_send_time = 0.0
@@ -360,17 +370,21 @@ class UnityInterface(Node):
         left_gripper_pos = None
         right_gripper_pos = None
 
+        now = self.get_clock().now().nanoseconds / 1e9
+        
         for i, name in enumerate(msg.name):
             if name.startswith("L_J"):
                 ros_name = self._map_unity_to_ros_name(name)
                 clamped = self._clamp_position(ros_name, msg.position[i])
                 self.latest_left_targets[ros_name] = clamped
                 self.has_left_target = True
+                self.last_unity_left_time = now
             elif name.startswith("R_J"):
                 ros_name = self._map_unity_to_ros_name(name)
                 clamped = self._clamp_position(ros_name, msg.position[i])
                 self.latest_right_targets[ros_name] = clamped
                 self.has_right_target = True
+                self.last_unity_right_time = now
             elif name == "L_EE":
                 left_gripper_pos = msg.position[i]
             elif name == "R_EE":
@@ -387,6 +401,8 @@ class UnityInterface(Node):
         定時器控制迴圈：
         1. 持續更新控制器狀態（計算平滑位置）
         2. 只有當上一個軌跡完成時才發送新軌跡（避免重疊）
+        3. 加入死區判斷，避免微小抖動
+        4. 加入 Unity 超時重置，允許其他命令控制
         """
         # 等待控制器初始化
         if not self.controllers_initialized:
@@ -401,29 +417,77 @@ class UnityInterface(Node):
 
         # === 左臂 ===
         if self.has_left_target and self.latest_left_targets:
-            # Step 1: 更新所有控制器狀態（每個週期都執行）
-            for joint_name, raw_target in self.latest_left_targets.items():
-                controller = self.left_controllers.get(joint_name)
-                if controller and controller.initialized:
-                    controller.update(raw_target, dt)
+            # 檢查 Unity 訊息是否超時
+            unity_timeout = (now - self.last_unity_left_time) > UNITY_MESSAGE_TIMEOUT
             
-            # Step 2: 檢查是否可以發送軌跡（等待上一個完成）
-            time_since_last = now - self.last_left_send_time
-            if time_since_last >= self.last_left_traj_duration:
-                self._send_trajectory("left", now)
+            if unity_timeout:
+                # Unity 超時，檢查是否所有關節都已到達目標（在死區內）
+                all_in_deadzone = self._check_all_in_deadzone("left")
+                if all_in_deadzone:
+                    # 所有關節都到達目標，停止發送並重置狀態
+                    self.has_left_target = False
+                    self.get_logger().debug("[left] Unity timeout + all joints in deadzone, stopped")
+                    # 不 return，繼續處理右臂
+                else:
+                    # 還有關節未到達，繼續追蹤
+                    pass
+            
+            if self.has_left_target:
+                # Step 1: 更新所有控制器狀態（每個週期都執行）
+                for joint_name, raw_target in self.latest_left_targets.items():
+                    controller = self.left_controllers.get(joint_name)
+                    if controller and controller.initialized:
+                        controller.update(raw_target, dt)
+                
+                # Step 2: 檢查是否可以發送軌跡（等待上一個完成）
+                time_since_last = now - self.last_left_send_time
+                if time_since_last >= self.last_left_traj_duration:
+                    # Step 3: 死區判斷 - 如果所有關節誤差都小於死區，不發送
+                    if not self._check_all_in_deadzone("left"):
+                        self._send_trajectory("left", now)
 
         # === 右臂 ===
         if self.has_right_target and self.latest_right_targets:
-            # Step 1: 更新所有控制器狀態
-            for joint_name, raw_target in self.latest_right_targets.items():
-                controller = self.right_controllers.get(joint_name)
-                if controller and controller.initialized:
-                    controller.update(raw_target, dt)
+            # 檢查 Unity 訊息是否超時
+            unity_timeout = (now - self.last_unity_right_time) > UNITY_MESSAGE_TIMEOUT
             
-            # Step 2: 檢查是否可以發送軌跡
-            time_since_last = now - self.last_right_send_time
-            if time_since_last >= self.last_right_traj_duration:
-                self._send_trajectory("right", now)
+            if unity_timeout:
+                all_in_deadzone = self._check_all_in_deadzone("right")
+                if all_in_deadzone:
+                    self.has_right_target = False
+                    self.get_logger().debug("[right] Unity timeout + all joints in deadzone, stopped")
+            
+            if self.has_right_target:
+                # Step 1: 更新所有控制器狀態
+                for joint_name, raw_target in self.latest_right_targets.items():
+                    controller = self.right_controllers.get(joint_name)
+                    if controller and controller.initialized:
+                        controller.update(raw_target, dt)
+                
+                # Step 2: 檢查是否可以發送軌跡
+                time_since_last = now - self.last_right_send_time
+                if time_since_last >= self.last_right_traj_duration:
+                    # Step 3: 死區判斷
+                    if not self._check_all_in_deadzone("right"):
+                        self._send_trajectory("right", now)
+    
+    def _check_all_in_deadzone(self, side: str) -> bool:
+        """檢查指定側所有關節是否都在死區內"""
+        if side == "left":
+            controllers = self.left_controllers
+            targets = self.latest_left_targets
+        else:
+            controllers = self.right_controllers
+            targets = self.latest_right_targets
+        
+        for joint_name, target in targets.items():
+            controller = controllers.get(joint_name)
+            if controller and controller.initialized:
+                output_pos = controller.get_output_position()
+                error = abs(target - output_pos)
+                if error > MOTION_DEADZONE:
+                    return False
+        return True
 
     def _send_trajectory(self, side: str, now: float):
         """發送軌跡並計算所需時間"""
