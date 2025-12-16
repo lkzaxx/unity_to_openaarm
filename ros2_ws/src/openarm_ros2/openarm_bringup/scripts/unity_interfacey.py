@@ -177,7 +177,7 @@ class UnityInterface(Node):
             f"Left Prefix: {self.left_prefix}, Right Prefix: {self.right_prefix}"
         )
         self.get_logger().info(
-            f"Velocity Safety Factor: {VELOCITY_SAFETY_FACTOR * 100:.0f}%"
+            f"Max Velocities: {MAX_VELOCITY}"
         )
         self.get_logger().info(
             f"Position Safety Factor: {POSITION_SAFETY_FACTOR * 100:.0f}%"
