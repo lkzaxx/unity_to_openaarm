@@ -53,7 +53,7 @@ MAX_ACCELERATION = {
 MIN_TRAJECTORY_TIME = 0.05  # 最小軌跡執行時間（秒）
 
 # 死區參數 - 避免微小抖動
-MOTION_DEADZONE = 0.06  # rad，誤差小於此值時停止發送軌跡（約 1°）
+MOTION_DEADZONE = 0.06  # rad，誤差小於此值時停止發送軌跡（0.02 約 1°）
 
 # Unity 訊息超時參數
 UNITY_MESSAGE_TIMEOUT = 0.5  # 秒，超過此時間沒收到 Unity 訊息則重置狀態
