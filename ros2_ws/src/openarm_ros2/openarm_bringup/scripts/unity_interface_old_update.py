@@ -570,10 +570,12 @@ class UnityInterface(Node):
         建立軌跡訊息。
         
         如果有上一個軌跡的終點（透過 side 取得），會建立兩點軌跡：
-        - 第一點：上一個軌跡的終點（時間 1ms），告訴 controller 從哪裡開始
+        - 第一點：上一個軌跡的終點，時間根據與當前位置的差距動態計算
         - 第二點：目標位置
         
-        這樣可以大幅減少軌跡切換時的回彈現象。
+        銜接點時間會根據「當前實際位置」與「銜接點位置」的差距動態計算：
+        - 差距小（正常銜接）：使用最小時間（1ms）
+        - 差距大（初始化或誤差）：使用速度限制計算安全時間
         """
         msg = JointTrajectory()
         msg.header = Header()
@@ -596,31 +598,63 @@ class UnityInterface(Node):
 
         # === 如果有上一個終點，建立兩點軌跡 ===
         if last_target and len(last_target) > 0:
-            # 第一點：上一個軌跡的終點（時間 1ms）
+            # 第一點：上一個軌跡的終點
             start_point = JointTrajectoryPoint()
             start_positions = []
+            
+            # 計算銜接點時間：根據「當前實際位置」與「銜接點位置」的差距
+            max_bridge_time = 0.001  # 最小 1ms
+            
             for name in joint_names:
                 # 使用上一個軌跡的終點位置
                 prev_pos = last_target.get(name, positions[joint_names.index(name)])
                 start_positions.append(prev_pos)
+                
+                # 計算與當前實際位置的差距
+                current_pos = self.current_positions.get(name, prev_pos)
+                delta = abs(prev_pos - current_pos)
+                
+                # 如果差距大於閾值（0.05 rad ≈ 3°），需要計算安全時間
+                if delta > 0.05:
+                    joint_key = name.split("_")[-1]  # joint1, joint2, etc.
+                    max_vel = self.joint_velocity_limits.get(joint_key, 2.0)
+                    if max_vel > 0:
+                        required_time = delta / max_vel
+                        max_bridge_time = max(max_bridge_time, required_time)
             
             start_point.positions = start_positions
             start_point.velocities = [0.0] * len(joint_names)  # 起點速度為 0
-            start_point.time_from_start.sec = 0
-            start_point.time_from_start.nanosec = 1000000  # 1ms
+            
+            # 設定銜接點時間（動態計算）
+            start_point.time_from_start.sec = int(max_bridge_time)
+            start_point.time_from_start.nanosec = int((max_bridge_time % 1) * 1e9)
             msg.points.append(start_point)
+            
+            # 如果銜接時間大於 1ms，記錄警告
+            if max_bridge_time > 0.01:
+                self.get_logger().warn(
+                    f"Bridge point time: {max_bridge_time:.3f}s (larger gap detected)"
+                )
 
         # === 目標點 ===
         target_point = JointTrajectoryPoint()
         target_point.positions = list(positions)
         target_point.velocities = [0.0] * len(joint_names)  # 終點速度為 0
-        target_point.time_from_start.sec = int(trajectory_time)
-        target_point.time_from_start.nanosec = int((trajectory_time % 1) * 1e9)
+        
+        # 目標點時間 = 銜接點時間 + 軌跡執行時間
+        if msg.points:  # 如果有銜接點
+            bridge_time = msg.points[0].time_from_start.sec + msg.points[0].time_from_start.nanosec / 1e9
+            total_time = bridge_time + trajectory_time
+        else:
+            total_time = trajectory_time
+        
+        target_point.time_from_start.sec = int(total_time)
+        target_point.time_from_start.nanosec = int((total_time % 1) * 1e9)
         msg.points.append(target_point)
 
         # 記錄使用的軌跡時間
         self.get_logger().info(
-            f"Trajectory: {len(msg.points)} points, duration: {trajectory_time:.3f}s"
+            f"Trajectory: {len(msg.points)} points, duration: {total_time:.3f}s"
         )
 
         return msg
