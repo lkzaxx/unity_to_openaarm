@@ -16,8 +16,7 @@ MIN_TRAJECTORY_TIME = 0.05  # 最小軌跡執行時間（秒）
 
 # 硬體速度上限 (rad/s) - 基於馬達規格
 HARDWARE_VELOCITY_LIMITS = {
-    "DM8009": 45.0,  # Joint 1, 2
-    
+    "DM8009": 45.0,  # Joint 1, 2    
     "DM4340": 8.0,  # Joint 3, 4
     "DM4310": 30.0,  # Joint 5, 6, 7
 }
