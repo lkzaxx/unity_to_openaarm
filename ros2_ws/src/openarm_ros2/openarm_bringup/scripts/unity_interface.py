@@ -10,15 +10,19 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 # ============================================================================
 # 全域配置參數 - 方便快速調整保護機制
 # ============================================================================
-VELOCITY_SAFETY_FACTOR = 0.2  # 速度安全係數（硬體上限的百分比）30%
 POSITION_SAFETY_FACTOR = 0.9  # 位置安全係數（使用範圍的百分比）90%
 MIN_TRAJECTORY_TIME = 0.05  # 最小軌跡執行時間（秒）
 
-# 硬體速度上限 (rad/s) - 基於馬達規格
-HARDWARE_VELOCITY_LIMITS = {
-    "DM8009": 45.0,  # Joint 1, 2    
-    "DM4340": 8.0,  # Joint 3, 4
-    "DM4310": 30.0,  # Joint 5, 6, 7
+# 速度限制 (rad/s) - 大關節慢、小關節快
+# 這些是「安全操作速度」，不是馬達硬體上限
+MAX_VELOCITY = {
+    "joint1": 1.0,   # 肩膀旋轉 - 最慢（慣性大，DM8009）
+    "joint2": 1.0,   # 肩膀抬舉 - 最慢（負重大，DM8009）
+    "joint3": 1.5,   # 上臂旋轉（DM4340）
+    "joint4": 1.5,   # 肘部彎曲（DM4340）
+    "joint5": 3.0,   # 前臂旋轉（DM4310）
+    "joint6": 3.0,   # 手腕彎曲（DM4310）
+    "joint7": 3.0,   # 手腕旋轉 - 最快（慣性小，DM4310）
 }
 
 # 硬體位置限制 (rad) - 基於 URDF (openarm_bimanual_control.urdf)
@@ -189,16 +193,8 @@ class UnityInterface(Node):
         self.joint_state_count = 0
 
     def _calculate_velocity_limits(self):
-        """根據全域安全係數計算速度限制"""
-        return {
-            "joint1": HARDWARE_VELOCITY_LIMITS["DM8009"] * VELOCITY_SAFETY_FACTOR,
-            "joint2": HARDWARE_VELOCITY_LIMITS["DM8009"] * VELOCITY_SAFETY_FACTOR,
-            "joint3": HARDWARE_VELOCITY_LIMITS["DM4340"] * VELOCITY_SAFETY_FACTOR,
-            "joint4": HARDWARE_VELOCITY_LIMITS["DM4340"] * VELOCITY_SAFETY_FACTOR,
-            "joint5": HARDWARE_VELOCITY_LIMITS["DM4310"] * VELOCITY_SAFETY_FACTOR,
-            "joint6": HARDWARE_VELOCITY_LIMITS["DM4310"] * VELOCITY_SAFETY_FACTOR,
-            "joint7": HARDWARE_VELOCITY_LIMITS["DM4310"] * VELOCITY_SAFETY_FACTOR,
-        }
+        """直接回傳速度限制設定"""
+        return MAX_VELOCITY
 
     def _calculate_position_limits(self, hw_position_limits):
         """根據全域安全係數計算位置限制（縮小範圍兩端各留緩衝）"""
