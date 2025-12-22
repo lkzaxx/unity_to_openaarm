@@ -264,9 +264,9 @@ hardware_interface::return_type OpenArm_v10HW::write(
   // Joint 0: 肩膀前後抬升 - 需要主要重力補償
   // Joint 1: 肩膀旋轉 - 側向時需要補償
   // Joint 3: 手肘 - 需要較小補償
-  constexpr double MAX_COMP_JOINT0 = 12.0;  // 肩膀抬升最大補償
-  constexpr double MAX_COMP_JOINT1 = 12.0;  // 肩膀旋轉最大補償
-  constexpr double MAX_COMP_JOINT3 = 5.0;   // 手肘最大補償
+  constexpr double MAX_COMP_JOINT0 = 15.0;  // 肩膀抬升最大補償
+  constexpr double MAX_COMP_JOINT1 = 15.0;  // 肩膀旋轉最大補償
+  constexpr double MAX_COMP_JOINT3 = 8.0;   // 手肘最大補償
   
   // 平滑係數：控制補償如何隨誤差變化
   // 較小的值 = 更平滑的過渡，較大的值 = 更快響應
