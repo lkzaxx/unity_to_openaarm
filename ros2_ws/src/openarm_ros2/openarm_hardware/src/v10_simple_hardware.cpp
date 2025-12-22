@@ -267,37 +267,35 @@ hardware_interface::return_type OpenArm_v10HW::write(
   constexpr double MAX_COMP_JOINT0 = 12.0;  // 肩膀抬升最大補償
   constexpr double MAX_COMP_JOINT1 = 12.0;  // 肩膀旋轉最大補償
   constexpr double MAX_COMP_JOINT3 = 5.0;   // 手肘最大補償
-  constexpr double ERROR_THRESHOLD = 0.03;  // 誤差閾值 (rad)
+  
+  // 平滑係數：控制補償如何隨誤差變化
+  // 較小的值 = 更平滑的過渡，較大的值 = 更快響應
+  constexpr double SMOOTH_FACTOR = 5.0;
   
   for (size_t i = 0; i < ARM_DOF; ++i) {
     double tau_ff = tau_commands_[i];
     double position_error = pos_commands_[i] - pos_states_[i];
     
-    // 動態重力補償：只在有誤差時施加，且根據姿態自動調整
-    if (std::abs(position_error) > ERROR_THRESHOLD) {
-      double direction = (position_error > 0) ? 1.0 : -1.0;
-      
-      if (i == 0) {
-        // Joint 0: 肩膀前後抬升 - 主要重力補償
-        // 力矩 = 最大補償 × sin(當前角度)
-        // 水平時 (θ=90°) sin=1 補償最大，垂直時 (θ=0°) sin=0 不需補償
-        double comp = MAX_COMP_JOINT0 * std::abs(std::sin(pos_states_[i]));
-        // 確保最小補償（避免接近零時補償太小）
-        comp = std::max(comp, MAX_COMP_JOINT0 * 0.3);
-        tau_ff += comp * direction;
-      } else if (i == 1) {
-        // Joint 1: 肩膀旋轉 - 側向力矩補償
-        // 當手臂伸出時（joint0 角度大）需要更多側向補償
-        double arm_extension = std::abs(std::sin(pos_states_[0]));
-        double comp = MAX_COMP_JOINT1 * arm_extension;
-        comp = std::max(comp, MAX_COMP_JOINT1 * 0.2);
-        tau_ff += comp * direction;
-      } else if (i == 3) {
-        // Joint 3: 手肘補償
-        double comp = MAX_COMP_JOINT3 * std::abs(std::sin(pos_states_[i]));
-        comp = std::max(comp, MAX_COMP_JOINT3 * 0.3);
-        tau_ff += comp * direction;
-      }
+    // 使用 tanh 平滑函數：誤差大時接近 ±1，誤差小時接近 0
+    // 這避免了開關式的切換造成的振盪
+    double smooth_direction = std::tanh(position_error * SMOOTH_FACTOR);
+    
+    if (i == 0) {
+      // Joint 0: 肩膀前後抬升 - 主要重力補償
+      // 力矩 = 最大補償 × sin(當前角度) × 平滑方向
+      double posture_factor = std::abs(std::sin(pos_states_[i]));
+      posture_factor = std::max(posture_factor, 0.3);  // 最小 30%
+      tau_ff += MAX_COMP_JOINT0 * posture_factor * smooth_direction;
+    } else if (i == 1) {
+      // Joint 1: 肩膀旋轉 - 側向力矩補償
+      double arm_extension = std::abs(std::sin(pos_states_[0]));
+      arm_extension = std::max(arm_extension, 0.2);  // 最小 20%
+      tau_ff += MAX_COMP_JOINT1 * arm_extension * smooth_direction;
+    } else if (i == 3) {
+      // Joint 3: 手肘補償
+      double posture_factor = std::abs(std::sin(pos_states_[i]));
+      posture_factor = std::max(posture_factor, 0.3);  // 最小 30%
+      tau_ff += MAX_COMP_JOINT3 * posture_factor * smooth_direction;
     }
     
     arm_params.push_back({DEFAULT_KP[i], DEFAULT_KD[i], pos_commands_[i],
