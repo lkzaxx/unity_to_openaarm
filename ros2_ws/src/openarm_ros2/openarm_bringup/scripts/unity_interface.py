@@ -663,8 +663,8 @@ class UnityInterface(Node):
             max_bridge_time = 0.001  # 最小 1ms
             
             for name in joint_names:
-                # 使用上一個軌跡的終點位置
-                prev_pos = last_target.get(name, positions[joint_names.index(name)])
+                # 🔧 使用當前實際位置作為銜接點（避免回彈）
+                prev_pos = self.current_positions.get(name, positions[joint_names.index(name)])
                 start_positions.append(prev_pos)
                 
                 # 計算與當前實際位置的差距
