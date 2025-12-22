@@ -260,20 +260,43 @@ hardware_interface::return_type OpenArm_v10HW::write(
   // Control arm motors with MIT control
   std::vector<openarm::damiao_motor::MITParam> arm_params;
   
-  // 重力補償力矩 (Nm) - Joint 1, 2 需要額外力矩來對抗手臂重量
-  constexpr double GRAVITY_COMPENSATION_TORQUE = 12.0;  // 8 Nm
+  // 動態重力補償參數 (Nm)
+  // Joint 0: 肩膀前後抬升 - 需要主要重力補償
+  // Joint 1: 肩膀旋轉 - 側向時需要補償
+  // Joint 3: 手肘 - 需要較小補償
+  constexpr double MAX_COMP_JOINT0 = 12.0;  // 肩膀抬升最大補償
+  constexpr double MAX_COMP_JOINT1 = 12.0;  // 肩膀旋轉最大補償
+  constexpr double MAX_COMP_JOINT3 = 5.0;   // 手肘最大補償
+  constexpr double ERROR_THRESHOLD = 0.03;  // 誤差閾值 (rad)
   
   for (size_t i = 0; i < ARM_DOF; ++i) {
     double tau_ff = tau_commands_[i];
+    double position_error = pos_commands_[i] - pos_states_[i];
     
-    // Joint 1, 2 (DM8009 馬達) 增加重力補償
-    // 根據目標位置方向給予正確的補償方向
-    if (i == 0 || i == 1 || i == 3) {
-      // 當目標位置為正值時（抬起方向），給予正向補償
-      if (pos_commands_[i] > 0.1) {
-        tau_ff += GRAVITY_COMPENSATION_TORQUE;
-      } else if (pos_commands_[i] < -0.1) {
-        tau_ff -= GRAVITY_COMPENSATION_TORQUE;
+    // 動態重力補償：只在有誤差時施加，且根據姿態自動調整
+    if (std::abs(position_error) > ERROR_THRESHOLD) {
+      double direction = (position_error > 0) ? 1.0 : -1.0;
+      
+      if (i == 0) {
+        // Joint 0: 肩膀前後抬升 - 主要重力補償
+        // 力矩 = 最大補償 × sin(當前角度)
+        // 水平時 (θ=90°) sin=1 補償最大，垂直時 (θ=0°) sin=0 不需補償
+        double comp = MAX_COMP_JOINT0 * std::abs(std::sin(pos_states_[i]));
+        // 確保最小補償（避免接近零時補償太小）
+        comp = std::max(comp, MAX_COMP_JOINT0 * 0.3);
+        tau_ff += comp * direction;
+      } else if (i == 1) {
+        // Joint 1: 肩膀旋轉 - 側向力矩補償
+        // 當手臂伸出時（joint0 角度大）需要更多側向補償
+        double arm_extension = std::abs(std::sin(pos_states_[0]));
+        double comp = MAX_COMP_JOINT1 * arm_extension;
+        comp = std::max(comp, MAX_COMP_JOINT1 * 0.2);
+        tau_ff += comp * direction;
+      } else if (i == 3) {
+        // Joint 3: 手肘補償
+        double comp = MAX_COMP_JOINT3 * std::abs(std::sin(pos_states_[i]));
+        comp = std::max(comp, MAX_COMP_JOINT3 * 0.3);
+        tau_ff += comp * direction;
       }
     }
     
