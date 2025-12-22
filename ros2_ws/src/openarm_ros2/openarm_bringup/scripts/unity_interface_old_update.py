@@ -13,6 +13,11 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 POSITION_SAFETY_FACTOR = 0.9  # 位置安全係數（使用範圍的百分比）90%
 MIN_TRAJECTORY_TIME = 0.05  # 最小軌跡執行時間（秒）
 
+# 🔥 啟動同步保護 - 差距大時使用慢速，避免馬達進入保護
+STARTUP_SYNC_VELOCITY = 0.628  # 啟動同步速度 (rad/s)，約 1.57rad/2.5s
+LARGE_DELTA_THRESHOLD = 0.3   # 差距大於此值 (rad, 約17°) 視為「大差距」
+SYNC_COMPLETE_THRESHOLD = 0.1 # 差距小於此值 (rad) 視為「同步完成」
+
 # 速度限制 (rad/s) - 大關節慢、小關節快
 # 這些是「安全操作速度」，不是馬達硬體上限
 MAX_VELOCITY = {
@@ -152,6 +157,13 @@ class UnityInterface(Node):
 
         # （用於目標變化死區判斷，差異小於此值時不再送出新軌跡）
         self.motion_done_epsilon = 0.1  # rad
+
+        # 🔥 啟動同步狀態追蹤
+        # 左右臂是否已完成初始同步（差距已縮小到閾值內）
+        self.left_sync_complete = False
+        self.right_sync_complete = False
+        # 是否曾經收到過有效的關節狀態
+        self.has_received_joint_states = False
         # === Unity 心跳檢測功能 ===
         # 是否啟用心跳檢測（True: 必須有心跳才發送軌跡, False: 不檢查心跳）
         self.enable_heartbeat_check = False
@@ -189,6 +201,10 @@ class UnityInterface(Node):
             f"Heartbeat Check: {'ENABLED' if self.enable_heartbeat_check else 'DISABLED'} (timeout={self.heartbeat_timeout}s)"
         )
         self.get_logger().info("Gripper action clients initialized")
+        self.get_logger().info(
+            f"Startup Sync: velocity={STARTUP_SYNC_VELOCITY:.3f}rad/s, "
+            f"large_delta={LARGE_DELTA_THRESHOLD:.2f}rad, sync_complete={SYNC_COMPLETE_THRESHOLD:.2f}rad"
+        )
 
         self.joint_state_count = 0
 
@@ -293,18 +309,28 @@ class UnityInterface(Node):
         if right_gripper_pos is not None:
             self.send_gripper_command("right", right_gripper_pos)
 
-    def calculate_safe_trajectory_time(self, joint_names, target_positions):
+    def calculate_safe_trajectory_time(self, joint_names, target_positions, side: str = None):
         """
         根據速度限制計算安全的軌跡執行時間
+        🔥 新增：差距大時使用慢速同步，差距小時使用正常速度
 
         Args:
             joint_names: 關節名稱列表
             target_positions: 目標位置列表
+            side: 'left' 或 'right'，用於判斷該側是否已完成同步
 
         Returns:
             float: 安全的軌跡執行時間（秒）
         """
         max_time = self.min_trajectory_time
+        max_delta = 0.0  # 追蹤最大差距
+
+        # 判斷該側是否已完成同步
+        sync_complete = False
+        if side == "left":
+            sync_complete = self.left_sync_complete
+        elif side == "right":
+            sync_complete = self.right_sync_complete
 
         for i, joint_name in enumerate(joint_names):
             # 提取關節編號 (e.g., "openarm_left_joint1" -> "joint1")
@@ -318,27 +344,55 @@ class UnityInterface(Node):
                 )
                 continue
 
-            max_velocity = self.joint_velocity_limits[joint_key]
+            # 獲取當前位置（如果沒有記錄則跳過計算）
+            if joint_name not in self.current_positions:
+                self.get_logger().debug(
+                    f"No current position for {joint_name}, using startup velocity"
+                )
+                # 沒有當前位置時，假設需要較長時間
+                max_time = max(max_time, 2.5)  # 使用固定的安全時間
+                continue
 
-            # 獲取當前位置（如果沒有記錄則假設為 0）
-            current_pos = self.current_positions.get(joint_name, 0.0)
+            current_pos = self.current_positions[joint_name]
             target_pos = target_positions[i]
 
-            # 計算位置變化和所需時間
+            # 計算位置變化
             delta_pos = abs(target_pos - current_pos)
+            max_delta = max(max_delta, delta_pos)
+
+            # 🔥 根據差距和同步狀態選擇速度
+            if not sync_complete and delta_pos > LARGE_DELTA_THRESHOLD:
+                # 差距大且未完成同步：使用慢速
+                effective_velocity = STARTUP_SYNC_VELOCITY
+                velocity_mode = "STARTUP"
+            else:
+                # 差距小或已完成同步：使用正常速度
+                effective_velocity = self.joint_velocity_limits[joint_key]
+                velocity_mode = "NORMAL"
+
+            # 計算所需時間
             required_time = (
-                delta_pos / max_velocity
-                if max_velocity > 0
+                delta_pos / effective_velocity
+                if effective_velocity > 0
                 else self.min_trajectory_time
             )
 
             # 記錄計算過程（僅在變化較大時）
             if delta_pos > 0.1:  # 只記錄大於 0.1 rad 的變化
                 self.get_logger().info(
-                    f"{joint_key}: Δ={delta_pos:.3f}rad, v_max={max_velocity:.1f}rad/s, t={required_time:.3f}s"
+                    f"{joint_key}: Δ={delta_pos:.3f}rad, v={effective_velocity:.2f}rad/s [{velocity_mode}], t={required_time:.3f}s"
                 )
 
             max_time = max(max_time, required_time)
+
+        # 🔥 更新同步狀態：如果最大差距小於閾值，標記為同步完成
+        if max_delta < SYNC_COMPLETE_THRESHOLD and max_delta > 0:
+            if side == "left" and not self.left_sync_complete:
+                self.left_sync_complete = True
+                self.get_logger().info("✅ Left arm sync complete! Switching to normal speed.")
+            elif side == "right" and not self.right_sync_complete:
+                self.right_sync_complete = True
+                self.get_logger().info("✅ Right arm sync complete! Switching to normal speed.")
 
         return max_time
 
@@ -450,6 +504,13 @@ class UnityInterface(Node):
             self.get_logger().debug(f"[{side}] No pending target")
             return
 
+        # 🔥 等待收到關節狀態後再發送軌跡（避免假設當前位置為 0）
+        if not self.has_received_joint_states:
+            self.get_logger().debug(
+                f"[{side}] Waiting for first joint states before sending trajectory..."
+            )
+            return
+
         # === Unity 心跳檢測 ===
         if self.enable_heartbeat_check:
             # 如果從未收到過心跳（last_heartbeat_time == 0），不發送軌跡
@@ -481,7 +542,7 @@ class UnityInterface(Node):
         # 如果還沒有送過任何目標（第一次），可以直接送出 pending
         if not last_target:
             joint_names, positions = pending
-            traj_time = self.calculate_safe_trajectory_time(joint_names, positions)
+            traj_time = self.calculate_safe_trajectory_time(joint_names, positions, side)
             traj_msg = self.create_trajectory_msg(joint_names, positions, traj_time, side)
 
             if side == "left":
@@ -537,7 +598,7 @@ class UnityInterface(Node):
                     self.pending_right_target = None
                 return
 
-        traj_time = self.calculate_safe_trajectory_time(joint_names, positions)
+        traj_time = self.calculate_safe_trajectory_time(joint_names, positions, side)
         traj_msg = self.create_trajectory_msg(joint_names, positions, traj_time, side)
 
         if side == "left":
@@ -745,6 +806,13 @@ class UnityInterface(Node):
         for i, name in enumerate(msg.name):
             if i < len(msg.position):
                 self.current_positions[name] = msg.position[i]
+
+        # 🔥 標記已收到過關節狀態
+        if not self.has_received_joint_states and len(self.current_positions) > 0:
+            self.has_received_joint_states = True
+            self.get_logger().info(
+                f"✅ Received first joint states! ({len(self.current_positions)} joints)"
+            )
 
         # 將 ROS2 的 JointState 轉換回 Unity 格式 (可選，如果 Unity 需要顯示)
         # 目前直接轉發，Unity 端可能需要對應的名稱處理，或者我們在這裡改名
