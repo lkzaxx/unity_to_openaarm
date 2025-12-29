@@ -314,7 +314,7 @@ class UnityFollowerInterface(Node):
             else:  # i == 3，手肘
                 if position_error > FULL_COMP_THRESHOLD:
                     compensation_ratio = 1.0
-                elif position_error > MIN_ERROR_FOR_COMP:
+                elif position_error > 0:
                     compensation_ratio = position_error / FULL_COMP_THRESHOLD
                 else:
                     compensation_ratio = 0.0
