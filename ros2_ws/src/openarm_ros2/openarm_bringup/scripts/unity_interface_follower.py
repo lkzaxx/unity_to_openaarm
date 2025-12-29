@@ -63,6 +63,12 @@ GRIPPER_KD = 0.1
 CONTROL_FREQUENCY = 500  # Hz
 CONTROL_PERIOD = 1.0 / CONTROL_FREQUENCY  # 2ms
 
+# 動態重力補償參數 (Nm) - 從 v10_simple_hardware.cpp 移植
+MAX_COMP_JOINT0 = 12.0   # Joint 0: 肩膀前後抬升最大補償
+MAX_COMP_JOINT1 = 12.0   # Joint 1: 肩膀旋轉最大補償
+MAX_COMP_JOINT3 = 5.0    # Joint 3: 手肘最大補償
+FULL_COMP_THRESHOLD = 0.1  # 誤差大於此值時給全力補償
+
 # ============================================================================
 # 安全限制
 # ============================================================================
@@ -229,6 +235,57 @@ class UnityFollowerInterface(Node):
         clamped = max(0.0, min(joint_value, 0.0425))
         return (clamped / GRIPPER_JOINT_0_POSITION) * GRIPPER_MOTOR_1_RADIANS
     
+    def _calculate_gravity_compensation(self, arm, target_pos):
+        """
+        計算動態重力補償力矩
+        移植自 v10_simple_hardware.cpp 的邏輯
+        
+        Args:
+            arm: OpenArm 物件（用於讀取當前位置）
+            target_pos: 目標位置列表
+        
+        Returns:
+            list: 7 個關節的補償力矩
+        """
+        import math
+        
+        compensations = [0.0] * 7
+        
+        # 讀取當前位置
+        try:
+            motors = arm.get_arm().get_motors()
+            current_pos = [m.get_position() for m in motors]
+        except:
+            return compensations
+        
+        for i in range(7):
+            position_error = target_pos[i] - current_pos[i]
+            abs_error = abs(position_error)
+            
+            # 混合策略：大誤差全力補償，小誤差平滑衰減
+            if abs_error >= FULL_COMP_THRESHOLD:
+                compensation_ratio = 1.0 if position_error > 0 else -1.0
+            else:
+                compensation_ratio = position_error / FULL_COMP_THRESHOLD
+            
+            if i == 0:
+                # Joint 0: 肩膀前後抬升 - 主要重力補償
+                posture_factor = abs(math.sin(current_pos[i]))
+                posture_factor = max(posture_factor, 0.3)  # 最小 30%
+                compensations[i] = MAX_COMP_JOINT0 * posture_factor * compensation_ratio
+            elif i == 1:
+                # Joint 1: 肩膀旋轉 - 側向力矩補償
+                arm_extension = abs(math.sin(current_pos[0]))
+                arm_extension = max(arm_extension, 0.2)  # 最小 20%
+                compensations[i] = MAX_COMP_JOINT1 * arm_extension * compensation_ratio
+            elif i == 3:
+                # Joint 3: 手肘補償
+                posture_factor = abs(math.sin(current_pos[i]))
+                posture_factor = max(posture_factor, 0.3)  # 最小 30%
+                compensations[i] = MAX_COMP_JOINT3 * posture_factor * compensation_ratio
+        
+        return compensations
+    
     def control_loop(self):
         """500Hz MIT 控制迴圈"""
         self.get_logger().info("Control loop started")
@@ -248,9 +305,19 @@ class UnityFollowerInterface(Node):
                 left_grip = self.left_gripper_target
                 right_grip = self.right_gripper_target
             
-            # 建立 MIT 命令
-            left_arm_cmds = [oa.MITParam(KP[i], KD[i], left_pos[i], 0.0, 0.0) for i in range(7)]
-            right_arm_cmds = [oa.MITParam(KP[i], KD[i], right_pos[i], 0.0, 0.0) for i in range(7)]
+            # 計算重力補償力矩
+            left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos)
+            right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos)
+            
+            # 建立 MIT 命令（包含重力補償力矩）
+            left_arm_cmds = [
+                oa.MITParam(KP[i], KD[i], left_pos[i], 0.0, left_comp[i]) 
+                for i in range(7)
+            ]
+            right_arm_cmds = [
+                oa.MITParam(KP[i], KD[i], right_pos[i], 0.0, right_comp[i]) 
+                for i in range(7)
+            ]
             
             left_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, left_grip, 0.0, 0.0)]
             right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
