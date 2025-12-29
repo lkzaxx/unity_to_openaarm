@@ -121,10 +121,6 @@ class UnityFollowerInterface(Node):
         self.left_smoothed = [0.0] * 7
         self.right_smoothed = [0.0] * 7
         
-        # === 上次目標（用於判斷目標是否變化） ===
-        self.last_left_target = [0.0] * 7
-        self.last_right_target = [0.0] * 7
-        
         # === Unity 連線狀態 ===
         self.last_unity_time = 0.0
         self.unity_connected = False
@@ -210,15 +206,10 @@ class UnityFollowerInterface(Node):
             self.get_logger().info("✅ Unity connected!")
         
         with self.target_lock:
-            # 先保存上次目標（用於判斷哪些關節目標正在變化）
-            self.last_left_target = self.left_target.copy()
-            self.last_right_target = self.right_target.copy()
-            
             for i, name in enumerate(msg.name):
                 if name.startswith('L_J'):
                     joint_idx = int(name.split('_J')[1]) - 1
                     if 0 <= joint_idx < 7:
-                        # 限制位置
                         pos = self._clamp_position(msg.position[i], joint_idx, LEFT_POSITION_LIMITS)
                         self.left_target[joint_idx] = pos
                 elif name.startswith('R_J'):
@@ -230,9 +221,6 @@ class UnityFollowerInterface(Node):
                     self.left_gripper_target = self._gripper_to_motor(msg.position[i])
                 elif name == 'R_EE':
                     self.right_gripper_target = self._gripper_to_motor(msg.position[i])
-        
-        # 🐛 調試：顯示收到的目標和變化
-        print(f"[Unity] Received: R_J1={self.right_target[0]:.2f}, last={self.last_right_target[0]:.2f}")
     
     def heartbeat_callback(self, msg: String):
         """心跳回調"""
@@ -257,17 +245,15 @@ class UnityFollowerInterface(Node):
         clamped = max(0.0, min(joint_value, 0.0425))
         return (clamped / GRIPPER_JOINT_0_POSITION) * GRIPPER_MOTOR_1_RADIANS
     
-    def _calculate_gravity_compensation(self, arm, target_pos, unity_target, last_unity_target, side: str):
+    def _calculate_gravity_compensation(self, arm, target_pos, side: str):
         """
         計算動態重力補償力矩
-        移植自 v10_simple_hardware.cpp 的邏輯
+        簡化版本，完全模仿 v10_simple_hardware.cpp 的邏輯
         
         Args:
             arm: OpenArm 物件（用於讀取當前位置）
-            target_pos: 平滑後的目標位置列表（用於計算誤差）
-            unity_target: Unity 發送的原始目標（用於判斷目標是否變化）
-            last_unity_target: 上次 Unity 發送的目標
-            side: "left" 或 "right"
+            target_pos: 目標位置列表
+            side: "left" 或 "right"（目前未使用，保留以備將來擴展）
         
         Returns:
             list: 7 個關節的補償力矩
@@ -284,40 +270,20 @@ class UnityFollowerInterface(Node):
             return compensations
         
         for i in range(7):
-            position_error = target_pos[i] - current_pos[i]
-            abs_error = abs(position_error)
-            
             # 只有補償關節 0, 1, 3
             if i not in [0, 1, 3]:
                 continue
             
-            # 🔧 核心修正：只有 Unity 目標正在變化的關節才給補償
-            # 比較 Unity 原始目標，而非 smoothed 後的目標
-            TARGET_CHANGE_THRESHOLD = 0.01  # 目標變化超過此值才算「正在變化」
-            target_is_changing = abs(unity_target[i] - last_unity_target[i]) > TARGET_CHANGE_THRESHOLD
+            position_error = target_pos[i] - current_pos[i]
+            abs_error = abs(position_error)
             
-            if not target_is_changing:
-                compensation_ratio = 0.0  # 目標沒變，不補償
-            elif i in [0, 1]:  # 肩膀關節，區分左右手方向
-                if side == "left":
-                    is_lifting = position_error < -FULL_COMP_THRESHOLD
-                else:  # right
-                    is_lifting = position_error > FULL_COMP_THRESHOLD
-                
-                if is_lifting:
-                    compensation_ratio = 1.0  # 抬起：全力補償
-                elif abs_error > FULL_COMP_THRESHOLD:
-                    compensation_ratio = 0.8  # 放下且誤差大：給 80% 補償抵抗重力
-                else:
-                    # 誤差較小但還在移動
-                    compensation_ratio = abs_error / FULL_COMP_THRESHOLD
-            else:  # i == 3，手肘
-                if position_error > FULL_COMP_THRESHOLD:
-                    compensation_ratio = 1.0
-                elif position_error > 0:
-                    compensation_ratio = position_error / FULL_COMP_THRESHOLD
-                else:
-                    compensation_ratio = 0.0
+            # 🔧 簡化邏輯：完全模仿 C++ 版本
+            # - 大誤差時 (>=0.1): 給全力補償（方向與誤差相同）
+            # - 小誤差時 (<0.1): 平滑衰減到零
+            if abs_error >= FULL_COMP_THRESHOLD:
+                compensation_ratio = 1.0 if position_error > 0 else -1.0
+            else:
+                compensation_ratio = position_error / FULL_COMP_THRESHOLD
             
             # 計算實際補償力矩
             if i == 0:
@@ -382,19 +348,9 @@ class UnityFollowerInterface(Node):
             left_pos = self.left_smoothed.copy()
             right_pos = self.right_smoothed.copy()
             
-            # 計算重力補償力矩（區分左右手方向，只對 Unity 目標變化的關節補償）
-            with self.target_lock:
-                unity_left_target = self.left_target.copy()
-                unity_right_target = self.right_target.copy()
-                last_left = self.last_left_target.copy()
-                last_right = self.last_right_target.copy()
-            
-            left_comp = self._calculate_gravity_compensation(
-                self.left_arm, left_pos, unity_left_target, last_left, "left"
-            )
-            right_comp = self._calculate_gravity_compensation(
-                self.right_arm, right_pos, unity_right_target, last_right, "right"
-            )
+            # 計算重力補償力矩（簡化版本，模仿 C++ 邏輯）
+            left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos, "left")
+            right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos, "right")
             
             # 建立 MIT 命令（包含重力補償力矩）
             left_arm_cmds = [
@@ -408,14 +364,6 @@ class UnityFollowerInterface(Node):
             
             left_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, left_grip, 0.0, 0.0)]
             right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
-            
-            # 🐛 調試：每秒顯示一次目標位置
-            import time as time_module
-            if not hasattr(self, '_last_log_time'):
-                self._last_log_time = 0
-            if time_module.time() - self._last_log_time > 1.0:
-                print(f"[MIT] R_J1 target={right_pos[0]:.2f}, smoothed from unity={unity_right_target[0]:.2f}")
-                self._last_log_time = time_module.time()
             
             # 發送到馬達
             try:
