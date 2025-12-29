@@ -23,8 +23,8 @@ import time
 # ============================================================================
 
 # CAN 介面
-LEFT_CAN_INTERFACE = "can1"
-RIGHT_CAN_INTERFACE = "can2"
+LEFT_CAN_INTERFACE = "can2"
+RIGHT_CAN_INTERFACE = "can1"
 
 # 馬達類型（V10 配置）
 MOTOR_TYPES = [
