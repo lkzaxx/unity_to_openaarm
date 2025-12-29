@@ -13,6 +13,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROS2_WS="$SCRIPT_DIR/.."
+VENV_PATH="/home/idaka/openarm_can/python/venv"
 
 echo "=============================================="
 echo "Unity Follower Interface - 500Hz MIT Control"
@@ -39,13 +40,18 @@ echo "TCP Endpoint PID: $TCP_PID"
 # 4. 等待 TCP Endpoint 啟動
 sleep 2
 
-# 5. 啟動 Follower Interface
+# 5. 啟用虛擬環境並啟動 Follower Interface
+echo ""
+echo "Activating virtual environment: $VENV_PATH"
+source "$VENV_PATH/bin/activate"
+
 echo ""
 echo "Starting Unity Follower Interface..."
 echo ""
 python3 "$ROS2_WS/src/openarm_ros2/openarm_bringup/scripts/unity_interface_follower.py"
 
 # 清理
+deactivate 2>/dev/null || true
 kill $TCP_PID 2>/dev/null || true
 echo ""
 echo "Shutdown complete."
