@@ -280,7 +280,7 @@ class UnityFollowerInterface(Node):
             
             # 🔧 修正：只有誤差足夠大時才給補償
             # 小誤差時不補償，避免靜止時被推動
-            MIN_ERROR_FOR_COMP = 0.05  # 至少 0.05 rad 誤差才給補償
+            MIN_ERROR_FOR_COMP = 0.5  # 至少 0.5 rad（約 29°）誤差才給補償
             
             if abs_error < MIN_ERROR_FOR_COMP:
                 compensation_ratio = 0.0  # 誤差太小，不補償
