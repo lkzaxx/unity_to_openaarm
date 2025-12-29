@@ -409,6 +409,14 @@ class UnityFollowerInterface(Node):
             left_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, left_grip, 0.0, 0.0)]
             right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
             
+            # 🐛 調試：每秒顯示一次目標位置
+            import time as time_module
+            if not hasattr(self, '_last_log_time'):
+                self._last_log_time = 0
+            if time_module.time() - self._last_log_time > 1.0:
+                print(f"[MIT] R_J1 target={right_pos[0]:.2f}, smoothed from unity={unity_right_target[0]:.2f}")
+                self._last_log_time = time_module.time()
+            
             # 發送到馬達
             try:
                 self.left_arm.get_arm().mit_control_all(left_arm_cmds)
