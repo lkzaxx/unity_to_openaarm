@@ -324,6 +324,11 @@ class UnityFollowerInterface(Node):
                 posture_factor = max(posture_factor, 0.3)  # 最小 30%
                 compensations[i] = MAX_COMP_JOINT3 * posture_factor * compensation_ratio
         
+        # 🐛 調試：顯示非零補償
+        non_zero = [(i, c) for i, c in enumerate(compensations) if abs(c) > 0.01]
+        if non_zero:
+            print(f"[{side}] Compensation: {non_zero}")
+        
         return compensations
     
     def control_loop(self):
