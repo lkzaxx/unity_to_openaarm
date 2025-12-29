@@ -272,60 +272,55 @@ class UnityFollowerInterface(Node):
         
         for i in range(7):
             position_error = target_pos[i] - current_pos[i]
+            abs_error = abs(position_error)
             
-            # 🔧 左右手方向不同：
-            # - 右手抬起：Joint 0, 1 的 position_error > 0
-            # - 左手抬起：Joint 0, 1 的 position_error < 0
-            # Joint 3 (手肘) 兩邊都是 > 0 表示彎曲
+            # 只有補償關節 0, 1, 3
+            if i not in [0, 1, 3]:
+                continue
             
-            # 先檢查是否已到達目標（誤差很小）
-            AT_TARGET_THRESHOLD = 0.02  # 小於此值視為已到達
-            if abs(position_error) < AT_TARGET_THRESHOLD:
-                compensation_ratio = 0.0  # 已到達，不需要補償
-            elif i in [0, 1]:  # 肩膀關節，左右方向相反
+            # 🔧 修正：只有誤差足夠大時才給補償
+            # 小誤差時不補償，避免靜止時被推動
+            MIN_ERROR_FOR_COMP = 0.05  # 至少 0.05 rad 誤差才給補償
+            
+            if abs_error < MIN_ERROR_FOR_COMP:
+                compensation_ratio = 0.0  # 誤差太小，不補償
+            elif i in [0, 1]:  # 肩膀關節，區分左右手方向
                 if side == "left":
                     is_lifting = position_error < -FULL_COMP_THRESHOLD
-                    near_target = -FULL_COMP_THRESHOLD < position_error < -AT_TARGET_THRESHOLD
-                    smooth_ratio = abs(position_error) / FULL_COMP_THRESHOLD if near_target else 0
                 else:  # right
                     is_lifting = position_error > FULL_COMP_THRESHOLD
-                    near_target = AT_TARGET_THRESHOLD < position_error < FULL_COMP_THRESHOLD
-                    smooth_ratio = position_error / FULL_COMP_THRESHOLD if near_target else 0
                 
                 if is_lifting:
-                    compensation_ratio = 1.0
-                elif near_target:
-                    compensation_ratio = smooth_ratio
+                    compensation_ratio = 1.0  # 抬起：全力補償
+                elif abs_error > FULL_COMP_THRESHOLD:
+                    compensation_ratio = 0.8  # 放下且誤差大：給 80% 補償抵抗重力
                 else:
-                    # 放下時給 80% 補償抵抗重力
-                    compensation_ratio = 0.8
-            else:  # Joint 3 和其他關節
+                    # 誤差較小但還在移動
+                    compensation_ratio = abs_error / FULL_COMP_THRESHOLD
+            else:  # i == 3，手肘
                 if position_error > FULL_COMP_THRESHOLD:
                     compensation_ratio = 1.0
-                elif position_error > AT_TARGET_THRESHOLD:
+                elif position_error > MIN_ERROR_FOR_COMP:
                     compensation_ratio = position_error / FULL_COMP_THRESHOLD
                 else:
-                    # 放下時給 80% 補償抵抗重力
-                    compensation_ratio = 0.8
+                    compensation_ratio = 0.0
             
+            # 計算實際補償力矩
             if i == 0:
-                # Joint 0: 肩膀前後抬升 - 主要重力補償
                 posture_factor = abs(math.sin(current_pos[i]))
-                posture_factor = max(posture_factor, 0.3)  # 最小 30%
+                posture_factor = max(posture_factor, 0.3)
                 compensations[i] = MAX_COMP_JOINT0 * posture_factor * compensation_ratio
             elif i == 1:
-                # Joint 1: 肩膀旋轉 - 側向力矩補償
                 arm_extension = abs(math.sin(current_pos[0]))
-                arm_extension = max(arm_extension, 0.2)  # 最小 20%
+                arm_extension = max(arm_extension, 0.2)
                 compensations[i] = MAX_COMP_JOINT1 * arm_extension * compensation_ratio
             elif i == 3:
-                # Joint 3: 手肘補償
                 posture_factor = abs(math.sin(current_pos[i]))
-                posture_factor = max(posture_factor, 0.3)  # 最小 30%
+                posture_factor = max(posture_factor, 0.3)
                 compensations[i] = MAX_COMP_JOINT3 * posture_factor * compensation_ratio
         
         # 🐛 調試：顯示非零補償
-        non_zero = [(i, c) for i, c in enumerate(compensations) if abs(c) > 0.01]
+        non_zero = [(i, round(c, 2)) for i, c in enumerate(compensations) if abs(c) > 0.01]
         if non_zero:
             print(f"[{side}] Compensation: {non_zero}")
         
