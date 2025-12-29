@@ -281,16 +281,16 @@ class UnityFollowerInterface(Node):
                 elif near_target:
                     compensation_ratio = smooth_ratio
                 else:
-                    # 放下時給 30% 補償抵抗重力
-                    compensation_ratio = 0.3
+                    # 放下時給 80% 補償抵抗重力
+                    compensation_ratio = 0.8
             else:  # Joint 3 和其他關節
                 if position_error > FULL_COMP_THRESHOLD:
                     compensation_ratio = 1.0
                 elif position_error > 0:
                     compensation_ratio = position_error / FULL_COMP_THRESHOLD
                 else:
-                    # 放下時給 30% 補償抵抗重力
-                    compensation_ratio = 0.3
+                    # 放下時給 80% 補償抵抗重力
+                    compensation_ratio = 0.8
             
             if i == 0:
                 # Joint 0: 肩膀前後抬升 - 主要重力補償
