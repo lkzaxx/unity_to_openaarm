@@ -299,11 +299,11 @@ class UnityFollowerInterface(Node):
                 posture_factor = max(posture_factor, 0.3)
                 compensations[i] = MAX_COMP_JOINT3 * posture_factor * compensation_ratio
         
-        # 🐛 調試：顯示非零補償和誤差
-        non_zero = [(i, round(c, 2)) for i, c in enumerate(compensations) if abs(c) > 0.01]
-        if non_zero:
-            errors = [(i, round(target_pos[i] - current_pos[i], 3)) for i in [0, 1, 3]]
-            print(f"[{side}] Errors: {errors}, Comp: {non_zero}")
+        # 🐛 調試：顯示非零補償和誤差（已註解）
+        # non_zero = [(i, round(c, 2)) for i, c in enumerate(compensations) if abs(c) > 0.01]
+        # if non_zero:
+        #     errors = [(i, round(target_pos[i] - current_pos[i], 3)) for i in [0, 1, 3]]
+        #     print(f"[{side}] Errors: {errors}, Comp: {non_zero}")
         
         return compensations
     
