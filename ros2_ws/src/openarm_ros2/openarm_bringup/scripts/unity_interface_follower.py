@@ -210,6 +210,10 @@ class UnityFollowerInterface(Node):
             self.get_logger().info("✅ Unity connected!")
         
         with self.target_lock:
+            # 先保存上次目標（用於判斷哪些關節目標正在變化）
+            self.last_left_target = self.left_target.copy()
+            self.last_right_target = self.right_target.copy()
+            
             for i, name in enumerate(msg.name):
                 if name.startswith('L_J'):
                     joint_idx = int(name.split('_J')[1]) - 1
@@ -250,15 +254,16 @@ class UnityFollowerInterface(Node):
         clamped = max(0.0, min(joint_value, 0.0425))
         return (clamped / GRIPPER_JOINT_0_POSITION) * GRIPPER_MOTOR_1_RADIANS
     
-    def _calculate_gravity_compensation(self, arm, target_pos, last_target, side: str):
+    def _calculate_gravity_compensation(self, arm, target_pos, unity_target, last_unity_target, side: str):
         """
         計算動態重力補償力矩
         移植自 v10_simple_hardware.cpp 的邏輯
         
         Args:
             arm: OpenArm 物件（用於讀取當前位置）
-            target_pos: 目標位置列表
-            last_target: 上次目標位置列表（用於判斷目標是否變化）
+            target_pos: 平滑後的目標位置列表（用於計算誤差）
+            unity_target: Unity 發送的原始目標（用於判斷目標是否變化）
+            last_unity_target: 上次 Unity 發送的目標
             side: "left" 或 "right"
         
         Returns:
@@ -283,10 +288,10 @@ class UnityFollowerInterface(Node):
             if i not in [0, 1, 3]:
                 continue
             
-            # 🔧 核心修正：只有目標正在變化的關節才給補償
-            # 這樣機械被動偏移就不會觸發錯誤補償
+            # 🔧 核心修正：只有 Unity 目標正在變化的關節才給補償
+            # 比較 Unity 原始目標，而非 smoothed 後的目標
             TARGET_CHANGE_THRESHOLD = 0.01  # 目標變化超過此值才算「正在變化」
-            target_is_changing = abs(target_pos[i] - last_target[i]) > TARGET_CHANGE_THRESHOLD
+            target_is_changing = abs(unity_target[i] - last_unity_target[i]) > TARGET_CHANGE_THRESHOLD
             
             if not target_is_changing:
                 compensation_ratio = 0.0  # 目標沒變，不補償
@@ -374,17 +379,19 @@ class UnityFollowerInterface(Node):
             left_pos = self.left_smoothed.copy()
             right_pos = self.right_smoothed.copy()
             
-            # 計算重力補償力矩（區分左右手方向，只對目標變化的關節補償）
+            # 計算重力補償力矩（區分左右手方向，只對 Unity 目標變化的關節補償）
+            with self.target_lock:
+                unity_left_target = self.left_target.copy()
+                unity_right_target = self.right_target.copy()
+                last_left = self.last_left_target.copy()
+                last_right = self.last_right_target.copy()
+            
             left_comp = self._calculate_gravity_compensation(
-                self.left_arm, left_pos, self.last_left_target, "left"
+                self.left_arm, left_pos, unity_left_target, last_left, "left"
             )
             right_comp = self._calculate_gravity_compensation(
-                self.right_arm, right_pos, self.last_right_target, "right"
+                self.right_arm, right_pos, unity_right_target, last_right, "right"
             )
-            
-            # 更新上次目標（用於下次判斷）
-            self.last_left_target = left_pos.copy()
-            self.last_right_target = right_pos.copy()
             
             # 建立 MIT 命令（包含重力補償力矩）
             left_arm_cmds = [
