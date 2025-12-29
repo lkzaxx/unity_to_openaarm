@@ -230,6 +230,9 @@ class UnityFollowerInterface(Node):
                     self.left_gripper_target = self._gripper_to_motor(msg.position[i])
                 elif name == 'R_EE':
                     self.right_gripper_target = self._gripper_to_motor(msg.position[i])
+        
+        # 🐛 調試：顯示收到的目標和變化
+        print(f"[Unity] Received: R_J1={self.right_target[0]:.2f}, last={self.last_right_target[0]:.2f}")
     
     def heartbeat_callback(self, msg: String):
         """心跳回調"""
