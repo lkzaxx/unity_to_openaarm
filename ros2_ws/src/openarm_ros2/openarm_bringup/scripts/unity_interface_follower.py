@@ -277,14 +277,19 @@ class UnityFollowerInterface(Node):
             # - 右手抬起：Joint 0, 1 的 position_error > 0
             # - 左手抬起：Joint 0, 1 的 position_error < 0
             # Joint 3 (手肘) 兩邊都是 > 0 表示彎曲
-            if i in [0, 1]:  # 肩膀關節，左右方向相反
+            
+            # 先檢查是否已到達目標（誤差很小）
+            AT_TARGET_THRESHOLD = 0.02  # 小於此值視為已到達
+            if abs(position_error) < AT_TARGET_THRESHOLD:
+                compensation_ratio = 0.0  # 已到達，不需要補償
+            elif i in [0, 1]:  # 肩膀關節，左右方向相反
                 if side == "left":
                     is_lifting = position_error < -FULL_COMP_THRESHOLD
-                    near_target = -FULL_COMP_THRESHOLD < position_error < 0
+                    near_target = -FULL_COMP_THRESHOLD < position_error < -AT_TARGET_THRESHOLD
                     smooth_ratio = abs(position_error) / FULL_COMP_THRESHOLD if near_target else 0
                 else:  # right
                     is_lifting = position_error > FULL_COMP_THRESHOLD
-                    near_target = 0 < position_error < FULL_COMP_THRESHOLD
+                    near_target = AT_TARGET_THRESHOLD < position_error < FULL_COMP_THRESHOLD
                     smooth_ratio = position_error / FULL_COMP_THRESHOLD if near_target else 0
                 
                 if is_lifting:
@@ -297,7 +302,7 @@ class UnityFollowerInterface(Node):
             else:  # Joint 3 和其他關節
                 if position_error > FULL_COMP_THRESHOLD:
                     compensation_ratio = 1.0
-                elif position_error > 0:
+                elif position_error > AT_TARGET_THRESHOLD:
                     compensation_ratio = position_error / FULL_COMP_THRESHOLD
                 else:
                     # 放下時給 80% 補償抵抗重力
