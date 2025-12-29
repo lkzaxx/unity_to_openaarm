@@ -235,7 +235,7 @@ class UnityFollowerInterface(Node):
         clamped = max(0.0, min(joint_value, 0.0425))
         return (clamped / GRIPPER_JOINT_0_POSITION) * GRIPPER_MOTOR_1_RADIANS
     
-    def _calculate_gravity_compensation(self, arm, target_pos):
+    def _calculate_gravity_compensation(self, arm, target_pos, side: str):
         """
         計算動態重力補償力矩
         移植自 v10_simple_hardware.cpp 的邏輯
@@ -243,6 +243,7 @@ class UnityFollowerInterface(Node):
         Args:
             arm: OpenArm 物件（用於讀取當前位置）
             target_pos: 目標位置列表
+            side: "left" 或 "right"
         
         Returns:
             list: 7 個關節的補償力矩
@@ -260,13 +261,34 @@ class UnityFollowerInterface(Node):
         
         for i in range(7):
             position_error = target_pos[i] - current_pos[i]
-            abs_error = abs(position_error)
             
-            # 混合策略：大誤差全力補償，小誤差平滑衰減
-            if abs_error >= FULL_COMP_THRESHOLD:
-                compensation_ratio = 1.0 if position_error > 0 else -1.0
-            else:
-                compensation_ratio = position_error / FULL_COMP_THRESHOLD
+            # 🔧 左右手方向不同：
+            # - 右手抬起：Joint 0, 1 的 position_error > 0
+            # - 左手抬起：Joint 0, 1 的 position_error < 0
+            # Joint 3 (手肘) 兩邊都是 > 0 表示彎曲
+            if i in [0, 1]:  # 肩膀關節，左右方向相反
+                if side == "left":
+                    is_lifting = position_error < -FULL_COMP_THRESHOLD
+                    near_target = -FULL_COMP_THRESHOLD < position_error < 0
+                    smooth_ratio = abs(position_error) / FULL_COMP_THRESHOLD if near_target else 0
+                else:  # right
+                    is_lifting = position_error > FULL_COMP_THRESHOLD
+                    near_target = 0 < position_error < FULL_COMP_THRESHOLD
+                    smooth_ratio = position_error / FULL_COMP_THRESHOLD if near_target else 0
+                
+                if is_lifting:
+                    compensation_ratio = 1.0
+                elif near_target:
+                    compensation_ratio = smooth_ratio
+                else:
+                    compensation_ratio = 0.0
+            else:  # Joint 3 和其他關節
+                if position_error > FULL_COMP_THRESHOLD:
+                    compensation_ratio = 1.0
+                elif position_error > 0:
+                    compensation_ratio = position_error / FULL_COMP_THRESHOLD
+                else:
+                    compensation_ratio = 0.0
             
             if i == 0:
                 # Joint 0: 肩膀前後抬升 - 主要重力補償
@@ -305,9 +327,9 @@ class UnityFollowerInterface(Node):
                 left_grip = self.left_gripper_target
                 right_grip = self.right_gripper_target
             
-            # 計算重力補償力矩
-            left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos)
-            right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos)
+            # 計算重力補償力矩（區分左右手方向）
+            left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos, "left")
+            right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos, "right")
             
             # 建立 MIT 命令（包含重力補償力矩）
             left_arm_cmds = [
