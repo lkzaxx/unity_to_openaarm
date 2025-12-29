@@ -26,3 +26,6 @@
 /packages/yum/env.sh
 /packages/yum/repositories/
 /packages/yum/tmp/
+
+# Python virtual environment
+/python/venv/
