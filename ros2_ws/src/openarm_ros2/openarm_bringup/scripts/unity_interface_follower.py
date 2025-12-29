@@ -69,6 +69,9 @@ MAX_COMP_JOINT1 = 12.0   # Joint 1: 肩膀旋轉最大補償
 MAX_COMP_JOINT3 = 5.0    # Joint 3: 手肘最大補償
 FULL_COMP_THRESHOLD = 0.1  # 誤差大於此值時給全力補償
 
+# 目標位置變化率限制 (rad/s) - 防止移動太快觸發馬達保護
+MAX_POSITION_RATE = [1.0, 1.0, 1.5, 1.5, 2.0, 2.0, 2.0]  # 各關節最大速度 (rad/s)
+
 # ============================================================================
 # 安全限制
 # ============================================================================
@@ -113,6 +116,10 @@ class UnityFollowerInterface(Node):
         self.left_gripper_target = 0.0
         self.right_gripper_target = 0.0
         self.target_lock = threading.Lock()
+        
+        # === 平滑後的目標（用於限制變化率） ===
+        self.left_smoothed = [0.0] * 7
+        self.right_smoothed = [0.0] * 7
         
         # === Unity 連線狀態 ===
         self.last_unity_time = 0.0
@@ -179,9 +186,13 @@ class UnityFollowerInterface(Node):
         
         with self.target_lock:
             for i, motor in enumerate(self.left_arm.get_arm().get_motors()):
-                self.left_target[i] = motor.get_position()
+                pos = motor.get_position()
+                self.left_target[i] = pos
+                self.left_smoothed[i] = pos  # 同步初始化 smoothed
             for i, motor in enumerate(self.right_arm.get_arm().get_motors()):
-                self.right_target[i] = motor.get_position()
+                pos = motor.get_position()
+                self.right_target[i] = pos
+                self.right_smoothed[i] = pos  # 同步初始化 smoothed
         
         self.get_logger().info(f"Initial left positions: {[f'{p:.2f}' for p in self.left_target]}")
         self.get_logger().info(f"Initial right positions: {[f'{p:.2f}' for p in self.right_target]}")
@@ -324,10 +335,32 @@ class UnityFollowerInterface(Node):
             
             # 取得最新目標（執行緒安全）
             with self.target_lock:
-                left_pos = self.left_target.copy()
-                right_pos = self.right_target.copy()
+                left_target = self.left_target.copy()
+                right_target = self.right_target.copy()
                 left_grip = self.left_gripper_target
                 right_grip = self.right_gripper_target
+            
+            # === 目標平滑：限制每個控制週期的目標變化量 ===
+            for i in range(7):
+                max_delta = MAX_POSITION_RATE[i] * CONTROL_PERIOD
+                
+                # 左手
+                delta_left = left_target[i] - self.left_smoothed[i]
+                if abs(delta_left) > max_delta:
+                    self.left_smoothed[i] += max_delta if delta_left > 0 else -max_delta
+                else:
+                    self.left_smoothed[i] = left_target[i]
+                
+                # 右手
+                delta_right = right_target[i] - self.right_smoothed[i]
+                if abs(delta_right) > max_delta:
+                    self.right_smoothed[i] += max_delta if delta_right > 0 else -max_delta
+                else:
+                    self.right_smoothed[i] = right_target[i]
+            
+            # 使用平滑後的目標
+            left_pos = self.left_smoothed.copy()
+            right_pos = self.right_smoothed.copy()
             
             # 計算重力補償力矩（區分左右手方向）
             left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos, "left")
