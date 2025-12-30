@@ -41,7 +41,10 @@ install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/unity_interface.py
+install(PROGRAMS 
+  scripts/unity_interface.py
+  scripts/unity_interface_follower.py
+  scripts/camera_publisher.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
