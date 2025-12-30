@@ -9,6 +9,7 @@ Unity Follower Interface 測試腳本
   python3 test_follower.py stop               # 停止（歸零）
   python3 test_follower.py dance              # 跳舞動作
   python3 test_follower.py shake              # 揮手動作
+  python3 test_follower.py soda               # 搖汽水動作
 """
 
 import rclpy
@@ -164,6 +165,47 @@ def run_shake(node):
     print("Shake complete!")
 
 
+def run_soda(node):
+    """搖汽水動作 - 雙臂往前抬升做上下搖擺"""
+    print("=== SODA: 搖汽水動作 ===")
+    
+    # 搖汽水動作序列 [(left_pos, right_pos, duration)]
+    # 只動 Joint 1 (肩膀前後) 和 Joint 4 (手肘)
+    # 左臂 Joint 1 方向與右臂相反
+    soda_sequence = [
+        # 準備姿勢：雙手往前抬 + 手肘彎曲
+        ([-1.0, 0, 0, 1.0, 0, 0, 0], [1.0, 0, 0, 1.0, 0, 0, 0], 2.0),
+        # 往上搖
+        ([-1.3, 0, 0, 0.7, 0, 0, 0], [1.3, 0, 0, 0.7, 0, 0, 0], 0.4),
+        # 往下搖
+        ([-0.7, 0, 0, 1.3, 0, 0, 0], [0.7, 0, 0, 1.3, 0, 0, 0], 0.4),
+        # 往上搖
+        ([-1.3, 0, 0, 0.7, 0, 0, 0], [1.3, 0, 0, 0.7, 0, 0, 0], 0.4),
+        # 往下搖
+        ([-0.7, 0, 0, 1.3, 0, 0, 0], [0.7, 0, 0, 1.3, 0, 0, 0], 0.4),
+        # 往上搖
+        ([-1.3, 0, 0, 0.7, 0, 0, 0], [1.3, 0, 0, 0.7, 0, 0, 0], 0.4),
+        # 往下搖
+        ([-0.7, 0, 0, 1.3, 0, 0, 0], [0.7, 0, 0, 1.3, 0, 0, 0], 0.4),
+        # 往上搖
+        ([-1.3, 0, 0, 0.7, 0, 0, 0], [1.3, 0, 0, 0.7, 0, 0, 0], 0.4),
+        # 往下搖
+        ([-0.7, 0, 0, 1.3, 0, 0, 0], [0.7, 0, 0, 1.3, 0, 0, 0], 0.4),
+        # 回到零位
+        ([0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], 2.0),
+    ]
+    
+    for i, (left_pos, right_pos, duration) in enumerate(soda_sequence):
+        print(f"  Step {i+1}/{len(soda_sequence)}...")
+        start = time.time()
+        while time.time() - start < duration:
+            node.send_both_arms(left_pos, right_pos)
+            rclpy.spin_once(node, timeout_sec=0.01)
+            time.sleep(0.016)
+    
+    print("Soda shake complete!")
+
+
 def run_custom(node, side: str, positions: list):
     """自訂位置測試"""
     print("=" * 50)
@@ -217,6 +259,8 @@ def main():
             run_dance(node)
         elif cmd == 'shake':
             run_shake(node)
+        elif cmd == 'soda':
+            run_soda(node)
         elif cmd in ['left', 'right']:
             side = cmd
             # 如果提供了自訂位置
@@ -237,9 +281,10 @@ def main():
         else:
             print(f"Unknown command: {cmd}")
             print("Usage:")
-            print("  python3 test_follower.py stop")
-            print("  python3 test_follower.py dance")
-            print("  python3 test_follower.py shake")
+            print("  python3 test_follower.py stop     # 雙臂歸零")
+            print("  python3 test_follower.py dance    # 跳舞動作")
+            print("  python3 test_follower.py shake    # 揮手動作")
+            print("  python3 test_follower.py soda     # 搖汽水動作")
             print("  python3 test_follower.py [left|right] [j1 j2 j3 j4 j5 j6 j7]")
     else:
         # 預設：右臂測試
