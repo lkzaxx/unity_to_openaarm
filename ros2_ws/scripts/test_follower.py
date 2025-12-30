@@ -6,6 +6,9 @@ Unity Follower Interface 測試腳本
   python3 test_follower.py                    # 測試右臂
   python3 test_follower.py left               # 測試左臂
   python3 test_follower.py right 1.0 0 0 1.5  # 自訂關節角度
+  python3 test_follower.py stop               # 停止（歸零）
+  python3 test_follower.py dance              # 跳舞動作
+  python3 test_follower.py shake              # 揮手動作
 """
 
 import rclpy
@@ -45,7 +48,23 @@ class FollowerTestNode(Node):
             msg.position.append(pos)
         
         self.pub.publish(msg)
-        self.get_logger().info(f"Sent {side} command: {[f'{p:.2f}' for p in positions]}")
+    
+    def send_both_arms(self, left_positions: list, right_positions: list):
+        """同時發送左右臂命令"""
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        
+        # 左臂
+        for i, pos in enumerate(left_positions):
+            msg.name.append(f'L_J{i+1}')
+            msg.position.append(pos)
+        
+        # 右臂
+        for i, pos in enumerate(right_positions):
+            msg.name.append(f'R_J{i+1}')
+            msg.position.append(pos)
+        
+        self.pub.publish(msg)
     
     def print_current_positions(self, side: str):
         """顯示當前位置"""
@@ -57,33 +76,96 @@ class FollowerTestNode(Node):
             print(f"  Joint {i}: {pos:.3f} rad ({pos * 180/3.14159:.1f}°)")
 
 
-def main():
-    rclpy.init()
-    node = FollowerTestNode()
+def run_stop(node):
+    """停止動作 - 雙臂歸零"""
+    print("=== STOP: 雙臂歸零 ===")
+    left_pos = [0, 0, 0, 0, 0, 0, 0]
+    right_pos = [0, 0, 0, 0, 0, 0, 0]
     
-    # 解析命令列參數
-    side = 'right'
-    if len(sys.argv) > 1:
-        if sys.argv[1] in ['left', 'right']:
-            side = sys.argv[1]
+    duration = 3.0
+    start = time.time()
+    while time.time() - start < duration:
+        node.send_both_arms(left_pos, right_pos)
+        rclpy.spin_once(node, timeout_sec=0.01)
+        time.sleep(0.016)
     
-    # 預設測試位置（右臂抬起）
-    # Joint 1: 1.57 rad (90°) - 向前抬起
-    # Joint 4: 1.5 rad (86°) - 手肘彎曲
-    default_positions = [1.57, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0]
+    print("Done!")
+
+
+def run_dance(node):
+    """跳舞動作 - 雙臂協調舞動"""
+    print("=== DANCE: 跳舞動作 ===")
     
-    # 如果提供了自訂位置
-    if len(sys.argv) > 2:
-        try:
-            positions = [float(x) for x in sys.argv[2:9]]
-            while len(positions) < 7:
-                positions.append(0.0)
-        except ValueError:
-            print("Error: Invalid position values")
-            return
-    else:
-        positions = default_positions
+    # 舞蹈動作序列 [(left_pos, right_pos, duration)]
+    # 注意：左臂 Joint 1, 2 方向與右臂相反
+    dance_sequence = [
+        # 開始姿勢
+        ([0, -1.5, -1.5, 0.5, 0, 0, -0.2], [0, 1.5, 1.5, 0.5, 0, 0, -0.2], 3.0),
+        # 舞動 1
+        ([0, -1.7, -1.5, 0.1, 0, 0, 0.5], [0, 1.7, 1.5, 0.1, 0, 0, 0.5], 1.0),
+        # 舞動 2
+        ([0, -1.5, -1.5, 0.5, 0, 0, -0.2], [0, 1.5, 1.5, 0.5, 0, 0, -0.2], 1.0),
+        # 舞動 3
+        ([0, -1.7, -1.5, 0.1, 0, 0, 0.5], [0, 1.7, 1.5, 0.1, 0, 0, 0.5], 1.0),
+        # 舞動 4
+        ([0, -1.5, -1.5, 0.5, 0, 0, -0.2], [0, 1.5, 1.5, 0.5, 0, 0, -0.2], 1.0),
+        # 舞動 5
+        ([0, -1.7, -1.5, 0.1, 0, 0, 0.5], [0, 1.7, 1.5, 0.1, 0, 0, 0.5], 1.0),
+        # 回到零位
+        ([0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], 3.0),
+    ]
     
+    for i, (left_pos, right_pos, duration) in enumerate(dance_sequence):
+        print(f"  Step {i+1}/{len(dance_sequence)}...")
+        start = time.time()
+        while time.time() - start < duration:
+            node.send_both_arms(left_pos, right_pos)
+            rclpy.spin_once(node, timeout_sec=0.01)
+            time.sleep(0.016)
+    
+    print("Dance complete!")
+
+
+def run_shake(node):
+    """揮手動作 - 右臂揮手"""
+    print("=== SHAKE: 右臂揮手 ===")
+    
+    # 左臂保持歸零
+    left_pos = [0, 0, 0, 0, 0, 0, 0]
+    
+    # 揮手動作序列 [(right_pos, duration)]
+    shake_sequence = [
+        # 抬起手臂
+        ([0, 1.5, 1.2, 1.8, 0, 0, 0], 3.0),
+        # 揮手 1
+        ([0, 1.5, 1.2, 1.2, 0, 0, 0], 1.0),
+        # 揮手 2
+        ([0, 1.5, 1.2, 1.8, 0, 0, 0], 1.0),
+        # 揮手 3
+        ([0, 1.5, 1.2, 1.2, 0, 0, 0], 1.0),
+        # 揮手 4
+        ([0, 1.5, 1.2, 1.8, 0, 0, 0], 1.0),
+        # 揮手 5
+        ([0, 1.5, 1.2, 1.2, 0, 0, 0], 1.0),
+        # 揮手 6
+        ([0, 1.5, 1.2, 1.8, 0, 0, 0], 1.0),
+        # 回到零位
+        ([0, 0, 0, 0, 0, 0, 0], 3.0),
+    ]
+    
+    for i, (right_pos, duration) in enumerate(shake_sequence):
+        print(f"  Step {i+1}/{len(shake_sequence)}...")
+        start = time.time()
+        while time.time() - start < duration:
+            node.send_both_arms(left_pos, right_pos)
+            rclpy.spin_once(node, timeout_sec=0.01)
+            time.sleep(0.016)
+    
+    print("Shake complete!")
+
+
+def run_custom(node, side: str, positions: list):
+    """自訂位置測試"""
     print("=" * 50)
     print("Unity Follower Interface Test")
     print("=" * 50)
@@ -115,6 +197,54 @@ def main():
     node.print_current_positions(side)
     
     print("\nDone!")
+
+
+def main():
+    rclpy.init()
+    node = FollowerTestNode()
+    
+    # 等待一下讓訂閱生效
+    time.sleep(0.5)
+    rclpy.spin_once(node, timeout_sec=0.5)
+    
+    # 解析命令列參數
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1].lower()
+        
+        if cmd == 'stop':
+            run_stop(node)
+        elif cmd == 'dance':
+            run_dance(node)
+        elif cmd == 'shake':
+            run_shake(node)
+        elif cmd in ['left', 'right']:
+            side = cmd
+            # 如果提供了自訂位置
+            if len(sys.argv) > 2:
+                try:
+                    positions = [float(x) for x in sys.argv[2:9]]
+                    while len(positions) < 7:
+                        positions.append(0.0)
+                except ValueError:
+                    print("Error: Invalid position values")
+                    node.destroy_node()
+                    rclpy.shutdown()
+                    return
+            else:
+                # 預設測試位置
+                positions = [1.57, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0]
+            run_custom(node, side, positions)
+        else:
+            print(f"Unknown command: {cmd}")
+            print("Usage:")
+            print("  python3 test_follower.py stop")
+            print("  python3 test_follower.py dance")
+            print("  python3 test_follower.py shake")
+            print("  python3 test_follower.py [left|right] [j1 j2 j3 j4 j5 j6 j7]")
+    else:
+        # 預設：右臂測試
+        run_custom(node, 'right', [1.57, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0])
+    
     node.destroy_node()
     rclpy.shutdown()
 
