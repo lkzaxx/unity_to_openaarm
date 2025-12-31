@@ -214,8 +214,16 @@ class SysCommands:
 
         new_subscriber = RosSubscriber(topic, message_class, self.tcp_server)
         self.tcp_server.subscribers_table[topic] = new_subscriber
+        
+        # 調試日誌
+        executor_status = "已建立" if self.tcp_server.executor is not None else "尚未建立"
+        self.tcp_server.loginfo(f"Executor 狀態: {executor_status}")
+        
         if self.tcp_server.executor is not None:
             self.tcp_server.executor.add_node(new_subscriber)
+            self.tcp_server.loginfo(f"已將訂閱者節點加入 Executor: {topic}")
+        else:
+            self.tcp_server.logwarn(f"Executor 尚未建立，無法加入節點: {topic}")
 
         self.tcp_server.loginfo("RegisterSubscriber({}, {}) OK".format(topic, message_class))
 
