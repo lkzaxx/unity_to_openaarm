@@ -15,6 +15,7 @@ Date: 2025-12-30
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import CompressedImage
 import cv2
 import numpy as np
@@ -47,18 +48,25 @@ class CameraPublisher(Node):
         self.enable_right = self.get_parameter('enable_right').value
         self.use_test_pattern = self.get_parameter('use_test_pattern').value
 
+        # 建立 QoS Profile - 使用 BEST_EFFORT 以提高與 ros_tcp_endpoint 的相容性
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1  # 只保留最新的一幀
+        )
+
         # 建立 Publishers
         if self.enable_left:
             self.pub_left = self.create_publisher(
-                CompressedImage, '/camera/left/compressed', 10
+                CompressedImage, '/camera/left/compressed', qos_profile
             )
-            self.get_logger().info('Left camera publisher created')
+            self.get_logger().info('Left camera publisher created (BEST_EFFORT QoS)')
 
         if self.enable_right:
             self.pub_right = self.create_publisher(
-                CompressedImage, '/camera/right/compressed', 10
+                CompressedImage, '/camera/right/compressed', qos_profile
             )
-            self.get_logger().info('Right camera publisher created')
+            self.get_logger().info('Right camera publisher created (BEST_EFFORT QoS)')
 
         # 相機擷取物件
         self.cap_left: Optional[cv2.VideoCapture] = None
