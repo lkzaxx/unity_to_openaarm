@@ -61,6 +61,9 @@ class RosSubscriber(RosReceiver):
             self.msg: The deserialize message
 
         """
+        # 調試日誌
+        print(f"[RosSubscriber] 收到訊息: {self.topic}, 正在轉發給 Unity...")
+        
         self.tcp_server.send_unity_message(self.topic, data)
         return self.msg
 
