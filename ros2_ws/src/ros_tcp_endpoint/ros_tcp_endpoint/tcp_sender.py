@@ -86,8 +86,11 @@ class UnityTcpSender:
 
     def send_unity_message(self, topic, message):
         if self.queue is not None:
+            print(f"[UnityTcpSender] 發送訊息到 Unity: {topic}")
             serialized_message = ClientThread.serialize_message(topic, message)
             self.queue.put(serialized_message)
+        else:
+            print(f"[UnityTcpSender] ⚠️ Queue 為 None，無法發送: {topic}")
 
     def send_unity_service_request(self, topic, service_class, request):
         if self.queue is None:
