@@ -48,11 +48,11 @@ class CameraPublisher(Node):
         self.enable_right = self.get_parameter('enable_right').value
         self.use_test_pattern = self.get_parameter('use_test_pattern').value
 
-        # 建立 QoS Profile - 使用 BEST_EFFORT 以提高與 ros_tcp_endpoint 的相容性
+        # 建立 QoS Profile - 使用 RELIABLE 以匹配 ros_tcp_endpoint
         qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1  # 只保留最新的一幀
+            depth=10
         )
 
         # 建立 Publishers
@@ -60,13 +60,13 @@ class CameraPublisher(Node):
             self.pub_left = self.create_publisher(
                 CompressedImage, '/camera/left/compressed', qos_profile
             )
-            self.get_logger().info('Left camera publisher created (BEST_EFFORT QoS)')
+            self.get_logger().info('Left camera publisher created (RELIABLE QoS)')
 
         if self.enable_right:
             self.pub_right = self.create_publisher(
                 CompressedImage, '/camera/right/compressed', qos_profile
             )
-            self.get_logger().info('Right camera publisher created (BEST_EFFORT QoS)')
+            self.get_logger().info('Right camera publisher created (RELIABLE QoS)')
 
         # 相機擷取物件
         self.cap_left: Optional[cv2.VideoCapture] = None
