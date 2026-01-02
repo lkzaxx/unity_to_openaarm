@@ -143,13 +143,18 @@ class TcpServer(Node):
             MultiThreadedExecutor allows us to set the number of threads
             needed as well as the nodes that need to be spun.
         """
-        num_threads = (
+        # 設置較大的執行緒數量以支援動態添加的訂閱者
+        # 原始邏輯在初始化時 table 都是空的，導致 num_threads 過小
+        base_threads = (
             len(self.publishers_table.keys())
             + len(self.subscribers_table.keys())
             + len(self.ros_services_table.keys())
             + len(self.unity_services_table.keys())
             + 1
         )
+        # 確保至少有 20 個執行緒來處理動態添加的節點
+        num_threads = max(base_threads, 20)
+        print(f"[TcpServer] 建立 Executor，執行緒數量: {num_threads}")
         executor = MultiThreadedExecutor(num_threads)
 
         executor.add_node(self)
