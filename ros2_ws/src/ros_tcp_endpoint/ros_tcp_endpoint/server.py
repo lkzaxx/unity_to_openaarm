@@ -118,12 +118,16 @@ class TcpServer(Node):
         self.unity_tcp_sender.send_unity_service_response(srv_id, data)
 
     def handle_syscommand(self, topic, data):
+        # 調試日誌：顯示收到的系統命令
+        print(f"[TcpServer] 收到 SysCommand: {topic}")
+        
         function = getattr(self.syscommands, topic[2:])
         if function is None:
             self.send_unity_error("Don't understand SysCommand.'{}'".format(topic))
         else:
             message_json = data.decode("utf-8")[:-1]
             params = json.loads(message_json)
+            print(f"[TcpServer] 執行 {topic[2:]}({params})")
             function(**params)
 
     def loginfo(self, text):
