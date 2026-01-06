@@ -176,7 +176,8 @@ class CameraPublisher(Node):
         self,
         frame: np.ndarray,
         publisher,
-        camera_side: str
+        camera_side: str,
+        stamp_msg
     ) -> None:
         """
         壓縮影像並發佈
@@ -185,6 +186,7 @@ class CameraPublisher(Node):
             frame: 原始影像
             publisher: ROS2 publisher
             camera_side: 'left' 或 'right'（用於 log）
+            stamp_msg: 時間戳訊息（左右相機使用同一個以便配對）
         """
         # JPEG 壓縮
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
@@ -196,7 +198,7 @@ class CameraPublisher(Node):
 
         # 建立並發佈訊息
         msg = CompressedImage()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp = stamp_msg  # 使用外部傳入的同一個 stamp（pair stamp）
         msg.header.frame_id = f'camera_{camera_side}'
         msg.format = 'jpeg'
         msg.data = encoded.tobytes()
@@ -207,15 +209,18 @@ class CameraPublisher(Node):
         """定時器回調：擷取並發佈影像"""
         self.frame_count += 1
 
+        # 取得同一對影像的時間戳（pair stamp）
+        pair_stamp = self.get_clock().now().to_msg()
+
         # 處理左眼相機
         if self.enable_left:
             if self.use_test_pattern:
                 frame_left = self._create_test_frame('left')
-                self._compress_and_publish(frame_left, self.pub_left, 'left')
+                self._compress_and_publish(frame_left, self.pub_left, 'left', pair_stamp)
             elif self.cap_left is not None:
                 ret, frame = self.cap_left.read()
                 if ret:
-                    self._compress_and_publish(frame, self.pub_left, 'left')
+                    self._compress_and_publish(frame, self.pub_left, 'left', pair_stamp)
                 else:
                     self.get_logger().warn('Failed to read left camera frame', throttle_duration_sec=5.0)
 
@@ -223,11 +228,11 @@ class CameraPublisher(Node):
         if self.enable_right:
             if self.use_test_pattern:
                 frame_right = self._create_test_frame('right')
-                self._compress_and_publish(frame_right, self.pub_right, 'right')
+                self._compress_and_publish(frame_right, self.pub_right, 'right', pair_stamp)
             elif self.cap_right is not None:
                 ret, frame = self.cap_right.read()
                 if ret:
-                    self._compress_and_publish(frame, self.pub_right, 'right')
+                    self._compress_and_publish(frame, self.pub_right, 'right', pair_stamp)
                 else:
                     self.get_logger().warn('Failed to read right camera frame', throttle_duration_sec=5.0)
 
