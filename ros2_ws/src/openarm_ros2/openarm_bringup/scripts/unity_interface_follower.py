@@ -74,6 +74,20 @@ FULL_COMP_THRESHOLD = 0.1  # 誤差大於此值時給全力補償
 MAX_POSITION_RATE = [1.2, 1.2, 1.5, 1.5, 2.0, 2.0, 2.0]  # 各關節最大速度 (rad/s)
 
 # ============================================================================
+# 優化開關（用於 A/B 測試）
+# ============================================================================
+
+# A. 狀態快取：避免 control_loop 和 state_timer 同時操作 CAN
+#    True = 所有 CAN I/O 在 control_loop，Timer 只發布快取（推薦）
+#    False = 原始行為，Timer 也會操作 CAN
+USE_STATE_CACHE = True
+
+# B. Deadline 時序：使用 perf_counter + deadline 避免時序漂移
+#    True = 使用 deadline 模式（推薦）
+#    False = 原始 sleep(period - elapsed) 模式
+USE_DEADLINE_TIMING = True
+
+# ============================================================================
 # 安全限制
 # ============================================================================
 
@@ -123,8 +137,19 @@ class UnityFollowerInterface(Node):
         self.right_smoothed = [0.0] * 7
         
         # === Unity 連線狀態 ===
-        self.last_unity_time = 0.0
+        self.last_unity_time = time.time()  # 初始化為當前時間，避免啟動時誤判
         self.unity_connected = False
+        
+        # === 狀態快取（用於 USE_STATE_CACHE 模式）===
+        self.state_lock = threading.Lock()
+        self.left_state = {
+            "pos": [0.0]*7, "vel": [0.0]*7, "tau": [0.0]*7,
+            "grip_pos": 0.0, "grip_vel": 0.0, "grip_tau": 0.0
+        }
+        self.right_state = {
+            "pos": [0.0]*7, "vel": [0.0]*7, "tau": [0.0]*7,
+            "grip_pos": 0.0, "grip_vel": 0.0, "grip_tau": 0.0
+        }
         
         # === 初始化 OpenArm CAN ===
         self.get_logger().info(f"Initializing Left Arm on {LEFT_CAN_INTERFACE}...")
@@ -177,6 +202,8 @@ class UnityFollowerInterface(Node):
         self.get_logger().info("✅ Unity Follower Interface started!")
         self.get_logger().info(f"   Control frequency: {CONTROL_FREQUENCY} Hz")
         self.get_logger().info(f"   Left arm: {LEFT_CAN_INTERFACE}, Right arm: {RIGHT_CAN_INTERFACE}")
+        self.get_logger().info(f"   USE_STATE_CACHE: {USE_STATE_CACHE}")
+        self.get_logger().info(f"   USE_DEADLINE_TIMING: {USE_DEADLINE_TIMING}")
     
     def _read_initial_positions(self):
         """讀取當前馬達位置作為初始目標（避免啟動時跳動）"""
@@ -312,11 +339,20 @@ class UnityFollowerInterface(Node):
         """500Hz MIT 控制迴圈"""
         self.get_logger().info("Control loop started")
         
+        # Deadline 模式初始化
+        if USE_DEADLINE_TIMING:
+            next_deadline = time.perf_counter()
+        
         while self.running:
-            loop_start = time.time()
+            # === 時序控制：根據模式選擇 ===
+            if USE_DEADLINE_TIMING:
+                next_deadline += CONTROL_PERIOD
+            else:
+                loop_start = time.time()
             
             # 檢查 Unity 連線狀態
-            if self.unity_connected and (time.time() - self.last_unity_time) > UNITY_TIMEOUT:
+            current_time = time.time()
+            if self.unity_connected and (current_time - self.last_unity_time) > UNITY_TIMEOUT:
                 self.unity_connected = False
                 self.get_logger().warn("⚠️ Unity connection timeout!")
             
@@ -375,39 +411,107 @@ class UnityFollowerInterface(Node):
                 self.right_arm.get_arm().mit_control_all(right_arm_cmds)
                 self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
                 self.right_arm.recv_all(500)
+                
+                # === 狀態快取：在 recv_all 後更新快取 ===
+                if USE_STATE_CACHE:
+                    with self.state_lock:
+                        # 左臂狀態
+                        lm = self.left_arm.get_arm().get_motors()
+                        self.left_state["pos"] = [m.get_position() for m in lm]
+                        self.left_state["vel"] = [m.get_velocity() for m in lm]
+                        self.left_state["tau"] = [m.get_torque() for m in lm]
+                        # 左夾爪
+                        try:
+                            lg = self.left_arm.get_gripper().get_motors()[0]
+                            self.left_state["grip_pos"] = lg.get_position()
+                            self.left_state["grip_vel"] = lg.get_velocity()
+                            self.left_state["grip_tau"] = lg.get_torque()
+                        except:
+                            pass
+                        
+                        # 右臂狀態
+                        rm = self.right_arm.get_arm().get_motors()
+                        self.right_state["pos"] = [m.get_position() for m in rm]
+                        self.right_state["vel"] = [m.get_velocity() for m in rm]
+                        self.right_state["tau"] = [m.get_torque() for m in rm]
+                        # 右夾爪
+                        try:
+                            rg = self.right_arm.get_gripper().get_motors()[0]
+                            self.right_state["grip_pos"] = rg.get_position()
+                            self.right_state["grip_vel"] = rg.get_velocity()
+                            self.right_state["grip_tau"] = rg.get_torque()
+                        except:
+                            pass
+                
             except Exception as e:
                 self.get_logger().error(f"Control error: {e}")
             
-            # 維持控制頻率
-            elapsed = time.time() - loop_start
-            sleep_time = CONTROL_PERIOD - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            # === 時序控制：維持控制頻率 ===
+            if USE_DEADLINE_TIMING:
+                # Deadline 模式：等待到下一個時間點
+                now = time.perf_counter()
+                sleep_time = next_deadline - now
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                # 如果超時，重置 deadline 避免追趕
+                elif sleep_time < -CONTROL_PERIOD:
+                    next_deadline = time.perf_counter()
+            else:
+                # 原始模式
+                elapsed = time.time() - loop_start
+                sleep_time = CONTROL_PERIOD - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
     
     def publish_joint_states(self):
         """發布當前關節狀態給 Unity (50Hz)"""
         try:
-            self.left_arm.refresh_all()
-            self.right_arm.refresh_all()
-            self.left_arm.recv_all(200)
-            self.right_arm.recv_all(200)
-            
             msg = JointState()
             msg.header.stamp = self.get_clock().now().to_msg()
             
-            # 左臂
-            for i, motor in enumerate(self.left_arm.get_arm().get_motors()):
-                msg.name.append(f'openarm_left_joint{i+1}')
-                msg.position.append(motor.get_position())
-                msg.velocity.append(motor.get_velocity())
-                msg.effort.append(motor.get_torque())
-            
-            # 右臂
-            for i, motor in enumerate(self.right_arm.get_arm().get_motors()):
-                msg.name.append(f'openarm_right_joint{i+1}')
-                msg.position.append(motor.get_position())
-                msg.velocity.append(motor.get_velocity())
-                msg.effort.append(motor.get_torque())
+            if USE_STATE_CACHE:
+                # === 快取模式：不操作 CAN，只讀取快取 ===
+                with self.state_lock:
+                    lpos = self.left_state["pos"][:]
+                    lvel = self.left_state["vel"][:]
+                    ltau = self.left_state["tau"][:]
+                    rpos = self.right_state["pos"][:]
+                    rvel = self.right_state["vel"][:]
+                    rtau = self.right_state["tau"][:]
+                
+                # 左臂
+                for i in range(7):
+                    msg.name.append(f'openarm_left_joint{i+1}')
+                    msg.position.append(lpos[i])
+                    msg.velocity.append(lvel[i])
+                    msg.effort.append(ltau[i])
+                
+                # 右臂
+                for i in range(7):
+                    msg.name.append(f'openarm_right_joint{i+1}')
+                    msg.position.append(rpos[i])
+                    msg.velocity.append(rvel[i])
+                    msg.effort.append(rtau[i])
+            else:
+                # === 原始模式：直接操作 CAN ===
+                self.left_arm.refresh_all()
+                self.right_arm.refresh_all()
+                self.left_arm.recv_all(200)
+                self.right_arm.recv_all(200)
+                
+                # 左臂
+                for i, motor in enumerate(self.left_arm.get_arm().get_motors()):
+                    msg.name.append(f'openarm_left_joint{i+1}')
+                    msg.position.append(motor.get_position())
+                    msg.velocity.append(motor.get_velocity())
+                    msg.effort.append(motor.get_torque())
+                
+                # 右臂
+                for i, motor in enumerate(self.right_arm.get_arm().get_motors()):
+                    msg.name.append(f'openarm_right_joint{i+1}')
+                    msg.position.append(motor.get_position())
+                    msg.velocity.append(motor.get_velocity())
+                    msg.effort.append(motor.get_torque())
             
             self.joint_state_pub.publish(msg)
         except Exception as e:
