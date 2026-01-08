@@ -34,7 +34,7 @@ class CameraPublisher(Node):
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 480)
         self.declare_parameter('fps', 15)
-        self.declare_parameter('jpeg_quality', 70)
+        self.declare_parameter('jpeg_quality', 90)
         self.declare_parameter('enable_left', True)
         self.declare_parameter('enable_right', True)
         self.declare_parameter('use_test_pattern', False)  # 用於沒有實體相機時的測試

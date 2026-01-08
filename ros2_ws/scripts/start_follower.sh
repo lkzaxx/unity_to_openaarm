@@ -11,6 +11,9 @@
 
 set -e
 
+# 設定 DISPLAY 環境變數 (nvarguscamerasrc 需要)
+export DISPLAY=:0
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROS2_WS="$SCRIPT_DIR/.."
 VENV_PATH="/home/idaka/openarm_can/python/venv"
@@ -40,13 +43,8 @@ echo "TCP Endpoint PID: $TCP_PID"
 # 4. 等待 TCP Endpoint 啟動
 sleep 2
 
-# 5. 啟用虛擬環境
-echo ""
-echo "Activating virtual environment: $VENV_PATH"
-source "$VENV_PATH/bin/activate"
-
-# 6. 啟動 Camera Publisher (背景執行)
-# 預設使用實體相機，如果相機不可用會自動使用測試模式
+# 5. 啟動 Camera Publisher (背景執行，使用系統 Python 以支援 GStreamer)
+# 必須在啟用 venv 之前執行，因為 venv 的 OpenCV 可能沒有 GStreamer 支援
 echo ""
 echo "Starting Camera Publisher (background)..."
 python3 "$ROS2_WS/src/openarm_ros2/openarm_bringup/scripts/camera_publisher.py" \
@@ -56,6 +54,11 @@ echo "Camera Publisher PID: $CAMERA_PID"
 
 # 等待相機初始化
 sleep 2
+
+# 6. 啟用虛擬環境 (僅供 unity_interface_follower 使用)
+echo ""
+echo "Activating virtual environment: $VENV_PATH"
+source "$VENV_PATH/bin/activate"
 
 # 7. 啟動 Unity Follower Interface (前景執行)
 echo ""
