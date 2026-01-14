@@ -41,10 +41,24 @@ MOTOR_TYPES = [
 SEND_IDS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]
 RECV_IDS = [0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]
 
-# 夾爪配置
+# 夾爪配置（舊夾爪 - 達妙 DM4310）
 GRIPPER_MOTOR_TYPE = oa.MotorType.DM4310
 GRIPPER_SEND_ID = 0x08
 GRIPPER_RECV_ID = 0x18
+
+# ============================================================================
+# 末端執行器切換配置
+# ============================================================================
+# 切換開關: "gripper" = 舊夾爪 (達妙 MIT), "dexterous_hand" = 靈巧手 (32B 封包)
+RIGHT_END_EFFECTOR_TYPE = "gripper"  # 右手: "gripper" 或 "dexterous_hand"
+LEFT_END_EFFECTOR_TYPE = "gripper"   # 左手: 保持舊夾爪
+
+# 靈巧手配置（僅 END_EFFECTOR_TYPE == "dexterous_hand" 時使用）
+DEXTEROUS_HAND_CAN_INTERFACE = "can0"  # TODO: 確認實際介面
+DEXTEROUS_HAND_CAN_ID = 0x01           # TODO: 確認實際 CAN ID
+DEXTEROUS_HAND_SPEED = 128             # 速度 (0~255)
+DEXTEROUS_HAND_TORQUE = 128            # 力矩 (0~255)
+DEXTEROUS_HAND_CONTROL_FREQ = 50       # 控制頻率 (Hz)
 
 # ============================================================================
 # MIT 控制參數
@@ -80,12 +94,12 @@ MAX_POSITION_RATE = [1.2, 1.2, 1.5, 1.5, 2.0, 2.0, 2.0]  # 各關節最大速度
 # A. 狀態快取：避免 control_loop 和 state_timer 同時操作 CAN
 #    True = 所有 CAN I/O 在 control_loop，Timer 只發布快取（推薦）
 #    False = 原始行為，Timer 也會操作 CAN
-USE_STATE_CACHE = True
+USE_STATE_CACHE = False
 
 # B. Deadline 時序：使用 perf_counter + deadline 避免時序漂移
 #    True = 使用 deadline 模式（推薦）
 #    False = 原始 sleep(period - elapsed) 模式
-USE_DEADLINE_TIMING = True
+USE_DEADLINE_TIMING = False
 
 # ============================================================================
 # 安全限制
@@ -161,6 +175,26 @@ class UnityFollowerInterface(Node):
         self.right_arm = oa.OpenArm(RIGHT_CAN_INTERFACE, True)
         self.right_arm.init_arm_motors(MOTOR_TYPES, SEND_IDS, RECV_IDS)
         self.right_arm.init_gripper_motor(GRIPPER_MOTOR_TYPE, GRIPPER_SEND_ID, GRIPPER_RECV_ID)
+        
+        # === 初始化靈巧手（如果啟用）===
+        self.right_dexterous_hand = None
+        if RIGHT_END_EFFECTOR_TYPE == "dexterous_hand":
+            try:
+                from openarm.can.dexterous_hand import DexterousHand
+                self.get_logger().info(f"Initializing Right Dexterous Hand on {DEXTEROUS_HAND_CAN_INTERFACE}...")
+                self.right_dexterous_hand = DexterousHand(
+                    DEXTEROUS_HAND_CAN_INTERFACE, 
+                    can_id=DEXTEROUS_HAND_CAN_ID
+                )
+                self.right_dexterous_hand.home()
+                time.sleep(1.0)
+                self.get_logger().info("✅ Right Dexterous Hand initialized!")
+            except Exception as e:
+                self.get_logger().error(f"❌ Failed to initialize Dexterous Hand: {e}")
+                self.get_logger().warn("Falling back to gripper mode")
+                self.right_dexterous_hand = None
+        else:
+            self.get_logger().info("Using original gripper for right arm")
         
         # === 啟用馬達 ===
         self.get_logger().info("Enabling all motors...")
@@ -343,7 +377,12 @@ class UnityFollowerInterface(Node):
         if USE_DEADLINE_TIMING:
             next_deadline = time.perf_counter()
         
+        # 靈巧手控制頻率計數器
+        hand_control_interval = CONTROL_FREQUENCY // DEXTEROUS_HAND_CONTROL_FREQ  # 500/50=10
+        loop_count = 0
+        
         while self.running:
+            loop_count += 1
             # === 時序控制：根據模式選擇 ===
             if USE_DEADLINE_TIMING:
                 next_deadline += CONTROL_PERIOD
@@ -400,16 +439,36 @@ class UnityFollowerInterface(Node):
             ]
             
             left_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, left_grip, 0.0, 0.0)]
-            right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
             
             # 發送到馬達
             try:
+                # === 左手臂 + 夾爪 ===
                 self.left_arm.get_arm().mit_control_all(left_arm_cmds)
                 self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
                 self.left_arm.recv_all(500)
                 
+                # === 右手臂 ===
                 self.right_arm.get_arm().mit_control_all(right_arm_cmds)
-                self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
+                
+                # === 右手末端執行器（切換邏輯）===
+                if self.right_dexterous_hand is not None:
+                    # 靈巧手控制（較低頻率: 50Hz）
+                    if loop_count % hand_control_interval == 0:
+                        # 將 Unity 的 gripper 值 (弧度) 轉換為 grip_value (0~1)
+                        # 原本: right_grip 是馬達弧度，範圍約 0 ~ -1.0472
+                        # 轉換: grip_value = |right_grip| / 1.0472
+                        grip_value = abs(right_grip) / 1.0472
+                        grip_value = max(0.0, min(1.0, grip_value))
+                        self.right_dexterous_hand.set_grip(
+                            grip_value,
+                            speed=DEXTEROUS_HAND_SPEED,
+                            torque=DEXTEROUS_HAND_TORQUE
+                        )
+                else:
+                    # 使用舊夾爪 (達妙 MIT 控制)
+                    right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
+                    self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
+                
                 self.right_arm.recv_all(500)
                 
                 # === 狀態快取：在 recv_all 後更新快取 ===
@@ -524,6 +583,17 @@ class UnityFollowerInterface(Node):
         
         if self.control_thread.is_alive():
             self.control_thread.join(timeout=1.0)
+        
+        # 關閉靈巧手（如果有）
+        if self.right_dexterous_hand is not None:
+            try:
+                self.get_logger().info("Opening dexterous hand before shutdown...")
+                self.right_dexterous_hand.open()
+                time.sleep(0.5)
+                self.right_dexterous_hand.disconnect()
+                self.get_logger().info("Dexterous hand disconnected")
+            except Exception as e:
+                self.get_logger().warn(f"Error closing dexterous hand: {e}")
         
         self.left_arm.disable_all()
         self.right_arm.disable_all()
