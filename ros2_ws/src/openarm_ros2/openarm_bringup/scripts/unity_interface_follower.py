@@ -18,6 +18,13 @@ import openarm_can as oa
 import threading
 import time
 
+# Ruckig 軌跡平滑（條件 import）
+try:
+    from ruckig import Ruckig, InputParameter, OutputParameter, Result
+    RUCKIG_AVAILABLE = True
+except ImportError:
+    RUCKIG_AVAILABLE = False
+
 # ============================================================================
 # 硬體配置
 # ============================================================================
@@ -86,6 +93,19 @@ USE_STATE_CACHE = True
 #    True = 使用 deadline 模式（推薦）
 #    False = 原始 sleep(period - elapsed) 模式
 USE_DEADLINE_TIMING = True
+
+# E. Ruckig 軌跡平滑：使用 Ruckig 產生 jerk-limited 軌跡
+#    True = 使用 Ruckig 平滑 + 速度前饋（推薦）
+#    False = 使用原始 rate limiting
+USE_RUCKIG_SMOOTHING = True
+
+# Ruckig 參數（只在 USE_RUCKIG_SMOOTHING = True 時使用）
+# 最大速度 (rad/s) - 與 MAX_POSITION_RATE 相同
+RUCKIG_MAX_VELOCITY = [1.2, 1.2, 1.5, 1.5, 2.0, 2.0, 2.0]
+# 最大加速度 (rad/s²)
+RUCKIG_MAX_ACCELERATION = [8.0, 8.0, 12.0, 12.0, 15.0, 15.0, 15.0]
+# 最大 jerk (rad/s³) - 控制加速度的變化率
+RUCKIG_MAX_JERK = [40.0, 40.0, 60.0, 60.0, 80.0, 80.0, 80.0]
 
 # ============================================================================
 # 安全限制
@@ -204,6 +224,13 @@ class UnityFollowerInterface(Node):
         self.get_logger().info(f"   Left arm: {LEFT_CAN_INTERFACE}, Right arm: {RIGHT_CAN_INTERFACE}")
         self.get_logger().info(f"   USE_STATE_CACHE: {USE_STATE_CACHE}")
         self.get_logger().info(f"   USE_DEADLINE_TIMING: {USE_DEADLINE_TIMING}")
+        self.get_logger().info(f"   USE_RUCKIG_SMOOTHING: {USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE}")
+        
+        # === Ruckig 初始化 ===
+        if USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE:
+            self._init_ruckig()
+        elif USE_RUCKIG_SMOOTHING and not RUCKIG_AVAILABLE:
+            self.get_logger().warn("⚠️ Ruckig not available, falling back to rate limiting")
     
     def _read_initial_positions(self):
         """讀取當前馬達位置作為初始目標（避免啟動時跳動）"""
@@ -224,6 +251,41 @@ class UnityFollowerInterface(Node):
         
         self.get_logger().info(f"Initial left positions: {[f'{p:.2f}' for p in self.left_target]}")
         self.get_logger().info(f"Initial right positions: {[f'{p:.2f}' for p in self.right_target]}")
+    
+    def _init_ruckig(self):
+        """初始化 Ruckig 軌跡生成器"""
+        self.get_logger().info("Initializing Ruckig trajectory generators...")
+        
+        # 左臂 Ruckig
+        self.left_otg = Ruckig(7, CONTROL_PERIOD)
+        self.left_ruckig_input = InputParameter(7)
+        self.left_ruckig_output = OutputParameter(7)
+        
+        # 右臂 Ruckig
+        self.right_otg = Ruckig(7, CONTROL_PERIOD)
+        self.right_ruckig_input = InputParameter(7)
+        self.right_ruckig_output = OutputParameter(7)
+        
+        # 設定限制
+        for inp in [self.left_ruckig_input, self.right_ruckig_input]:
+            inp.max_velocity = RUCKIG_MAX_VELOCITY
+            inp.max_acceleration = RUCKIG_MAX_ACCELERATION
+            inp.max_jerk = RUCKIG_MAX_JERK
+        
+        # 初始化當前狀態（使用讀取的初始位置）
+        self.left_ruckig_input.current_position = self.left_smoothed[:]
+        self.left_ruckig_input.current_velocity = [0.0] * 7
+        self.left_ruckig_input.current_acceleration = [0.0] * 7
+        
+        self.right_ruckig_input.current_position = self.right_smoothed[:]
+        self.right_ruckig_input.current_velocity = [0.0] * 7
+        self.right_ruckig_input.current_acceleration = [0.0] * 7
+        
+        # 速度前饋快取
+        self.left_velocity_ff = [0.0] * 7
+        self.right_velocity_ff = [0.0] * 7
+        
+        self.get_logger().info("✅ Ruckig initialized!")
     
     def unity_callback(self, msg: JointState):
         """Unity 傳來目標時，只更新 target（不阻塞）"""
@@ -363,39 +425,71 @@ class UnityFollowerInterface(Node):
                 left_grip = self.left_gripper_target
                 right_grip = self.right_gripper_target
             
-            # === 目標平滑：限制每個控制週期的目標變化量 ===
-            for i in range(7):
-                max_delta = MAX_POSITION_RATE[i] * CONTROL_PERIOD
+            # === 目標平滑：根據模式選擇 ===
+            if USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE:
+                # Ruckig 模式：使用 jerk-limited 軌跡
+                self.left_ruckig_input.target_position = left_target
+                self.right_ruckig_input.target_position = right_target
                 
-                # 左手
-                delta_left = left_target[i] - self.left_smoothed[i]
-                if abs(delta_left) > max_delta:
-                    self.left_smoothed[i] += max_delta if delta_left > 0 else -max_delta
-                else:
-                    self.left_smoothed[i] = left_target[i]
+                # 更新左臂軌跡
+                left_result = self.left_otg.update(self.left_ruckig_input, self.left_ruckig_output)
+                left_pos = list(self.left_ruckig_output.new_position)
+                self.left_velocity_ff = list(self.left_ruckig_output.new_velocity)
                 
-                # 右手
-                delta_right = right_target[i] - self.right_smoothed[i]
-                if abs(delta_right) > max_delta:
-                    self.right_smoothed[i] += max_delta if delta_right > 0 else -max_delta
-                else:
-                    self.right_smoothed[i] = right_target[i]
-            
-            # 使用平滑後的目標
-            left_pos = self.left_smoothed.copy()
-            right_pos = self.right_smoothed.copy()
+                # 更新 Ruckig 狀態
+                self.left_ruckig_input.current_position = left_pos
+                self.left_ruckig_input.current_velocity = self.left_velocity_ff
+                self.left_ruckig_input.current_acceleration = list(self.left_ruckig_output.new_acceleration)
+                
+                # 更新右臂軌跡
+                right_result = self.right_otg.update(self.right_ruckig_input, self.right_ruckig_output)
+                right_pos = list(self.right_ruckig_output.new_position)
+                self.right_velocity_ff = list(self.right_ruckig_output.new_velocity)
+                
+                # 更新 Ruckig 狀態
+                self.right_ruckig_input.current_position = right_pos
+                self.right_ruckig_input.current_velocity = self.right_velocity_ff
+                self.right_ruckig_input.current_acceleration = list(self.right_ruckig_output.new_acceleration)
+                
+                # 同步 smoothed 變數（給其他功能使用）
+                self.left_smoothed = left_pos[:]
+                self.right_smoothed = right_pos[:]
+            else:
+                # 原始模式：使用 rate limiting
+                for i in range(7):
+                    max_delta = MAX_POSITION_RATE[i] * CONTROL_PERIOD
+                    
+                    # 左手
+                    delta_left = left_target[i] - self.left_smoothed[i]
+                    if abs(delta_left) > max_delta:
+                        self.left_smoothed[i] += max_delta if delta_left > 0 else -max_delta
+                    else:
+                        self.left_smoothed[i] = left_target[i]
+                    
+                    # 右手
+                    delta_right = right_target[i] - self.right_smoothed[i]
+                    if abs(delta_right) > max_delta:
+                        self.right_smoothed[i] += max_delta if delta_right > 0 else -max_delta
+                    else:
+                        self.right_smoothed[i] = right_target[i]
+                
+                left_pos = self.left_smoothed.copy()
+                right_pos = self.right_smoothed.copy()
+                # 原始模式沒有速度前饋
+                self.left_velocity_ff = [0.0] * 7
+                self.right_velocity_ff = [0.0] * 7
             
             # 計算重力補償力矩（簡化版本，模仿 C++ 邏輯）
             left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos, "left")
             right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos, "right")
             
-            # 建立 MIT 命令（包含重力補償力矩）
+            # 建立 MIT 命令（包含速度前饋和重力補償力矩）
             left_arm_cmds = [
-                oa.MITParam(KP[i], KD[i], left_pos[i], 0.0, left_comp[i]) 
+                oa.MITParam(KP[i], KD[i], left_pos[i], self.left_velocity_ff[i], left_comp[i]) 
                 for i in range(7)
             ]
             right_arm_cmds = [
-                oa.MITParam(KP[i], KD[i], right_pos[i], 0.0, right_comp[i]) 
+                oa.MITParam(KP[i], KD[i], right_pos[i], self.right_velocity_ff[i], right_comp[i]) 
                 for i in range(7)
             ]
             
