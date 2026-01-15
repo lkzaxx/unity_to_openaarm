@@ -19,6 +19,8 @@
 .rviz2/
 .cursor/
 .cursor-server/
+.antigravity-server/
+.gemini/
 
 # ROS2 編譯產物
 ros2_ws/build/

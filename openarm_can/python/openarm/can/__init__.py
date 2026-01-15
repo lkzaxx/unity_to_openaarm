@@ -20,7 +20,15 @@ allowing you to control DAMIAO motors through SocketCAN.
 """
 
 # Import all C++ bindings directly - 1:1 mapping with C++ API
-from .core import *
+# Import all C++ bindings directly - 1:1 mapping with C++ API
+try:
+    from .core import *
+except ImportError:
+    # Allow importing pure Python modules even if C++ extension is missing
+    pass
+
+# Import dexterous hand module (pure Python)
+from .dexterous_hand import DexterousHand
 
 __version__ = "1.1.0"
 __author__ = "Enactic, Inc."
@@ -50,4 +58,7 @@ __all__ = [
 
     # Exceptions
     "CANSocketException",
+    
+    # Dexterous Hand (Pure Python)
+    "DexterousHand",
 ]
