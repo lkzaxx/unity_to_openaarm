@@ -420,24 +420,46 @@ class UnityFollowerInterface(Node):
     
     def _send_hand_positions(self, can_id: int, positions: list):
         """
-        發送靈巧手位置命令
+        發送靈巧手位置命令（帶變化偵測）
         
         Args:
             can_id: CAN ID (0x11=右手, 0x12=左手)
             positions: 6 個手指位置 (0~1)
+        
+        Returns:
+            True 如果發送，False 如果跳過（位置無變化）
         """
         if self.zlgcan is None:
-            return
+            return False
         
-        # 32 bytes 封包格式:
-        # [0xFD][0x01][M1: Pos,Speed,Torque,0,0][M2: ...][M3: ...][M4: ...][M5: ...][M6: ...]
-        data = [0xFD, 0x01]  # 全選寫入 + 位置模式
+        # 初始化上次發送的位置記錄
+        if not hasattr(self, '_last_sent_positions'):
+            self._last_sent_positions = {}
         
+        # 計算位置值
         pos_values = []
         for i in range(6):
             pos_value = int(positions[i] * 255)  # 0~1 -> 0~255
             pos_value = max(0, min(255, pos_value))
             pos_values.append(pos_value)
+        
+        # 檢查是否有足夠的變化（閾值 5 = 約 2% 變化）
+        CHANGE_THRESHOLD = 5
+        last_pos = self._last_sent_positions.get(can_id, None)
+        if last_pos is not None:
+            max_change = max(abs(pos_values[i] - last_pos[i]) for i in range(6))
+            if max_change < CHANGE_THRESHOLD:
+                # 變化太小，跳過發送
+                return False
+        
+        # 記錄本次發送的位置
+        self._last_sent_positions[can_id] = pos_values[:]
+        
+        # 32 bytes 封包格式:
+        # [0xFD][0x01][M1: Pos,Speed,Torque,0,0][M2: ...][M3: ...][M4: ...][M5: ...][M6: ...]
+        data = [0xFD, 0x01]  # 全選寫入 + 位置模式
+        
+        for pos_value in pos_values:
             # 每個馬達 5 bytes: Position, Speed, Torque, Reserved, Reserved
             data.extend([pos_value, DEXTEROUS_HAND_SPEED, DEXTEROUS_HAND_TORQUE, 0xFF, 0xFF])
         
