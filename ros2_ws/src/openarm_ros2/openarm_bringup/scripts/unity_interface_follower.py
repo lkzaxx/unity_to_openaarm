@@ -458,7 +458,7 @@ class UnityFollowerInterface(Node):
         
         # 發送策略：穩定後發送
         # 只有當目標位置穩定一段時間後才發送，避免塞車
-        MIN_INTERVAL = 0.25  # 最小發送間隔 250ms
+        MIN_INTERVAL = 0.50  # 最小發送間隔 500ms（測試用）
         STABLE_TIME = 0.10   # 穩定時間 100ms
         CHANGE_THRESHOLD = 10  # 變化閾值
         
