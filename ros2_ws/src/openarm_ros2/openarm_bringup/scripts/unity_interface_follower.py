@@ -66,8 +66,8 @@ ENABLE_DEXTEROUS_HAND = True  # 啟用靈巧手控制（需要 USB CANFD 設備�
 # 注意：左右靈巧手共用同一個 USB CANFD 設備，透過不同 CAN ID 區分
 DEXTEROUS_HAND_LEFT_CAN_ID = 0x12   # 左靈巧手 CAN ID
 DEXTEROUS_HAND_RIGHT_CAN_ID = 0x11  # 右靈巧手 CAN ID
-DEXTEROUS_HAND_SPEED = 128          # 速度 (0~255)
-DEXTEROUS_HAND_TORQUE = 128         # 力矩 (0~255)
+DEXTEROUS_HAND_SPEED = 200          # 速度 (0~255)
+DEXTEROUS_HAND_TORQUE = 200         # 力矩 (0~255)
 DEXTEROUS_HAND_CONTROL_FREQ = 50    # 控制頻率 (Hz)
 
 # ============================================================================
