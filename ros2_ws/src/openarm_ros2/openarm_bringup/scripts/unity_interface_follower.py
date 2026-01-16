@@ -645,9 +645,8 @@ class UnityFollowerInterface(Node):
                 if self.dexterous_hand_ready and loop_count % hand_control_interval == 0:
                     with self.hand_target_lock:
                         left_fingers = self.left_hand_target[:]
-                    # 只有當手指值不全為 0 時才發送
-                    if any(f > 0.01 for f in left_fingers):
-                        self._send_hand_positions(DEXTEROUS_HAND_LEFT_CAN_ID, left_fingers)
+                    # 左手：總是發送（移除判斷條件以便測試）
+                    self._send_hand_positions(DEXTEROUS_HAND_LEFT_CAN_ID, left_fingers)
                 
                 self.left_arm.recv_all(500)
                 
@@ -664,9 +663,8 @@ class UnityFollowerInterface(Node):
                 if self.dexterous_hand_ready and loop_count % hand_control_interval == 0:
                     with self.hand_target_lock:
                         right_fingers = self.right_hand_target[:]
-                    # 只有當手指值不全為 0 時才發送
-                    if any(f > 0.01 for f in right_fingers):
-                        self._send_hand_positions(DEXTEROUS_HAND_RIGHT_CAN_ID, right_fingers)
+                    # 右手：總是發送（移除判斷條件以便測試）
+                    self._send_hand_positions(DEXTEROUS_HAND_RIGHT_CAN_ID, right_fingers)
                 
                 self.right_arm.recv_all(500)
                 
