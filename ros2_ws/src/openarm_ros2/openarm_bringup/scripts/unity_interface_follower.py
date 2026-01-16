@@ -457,9 +457,9 @@ class UnityFollowerInterface(Node):
             pos_values.append(pos_value)
         
         # 發送策略：固定最小間隔 + 大變化立即發送
-        MIN_INTERVAL = 0.15  # 最小發送間隔 150ms
-        CHANGE_THRESHOLD = 10  # 最小變化閾值（提高以減少小變化發送）
-        LARGE_CHANGE = 50  # 大變化閾值（超過此值立即發送）
+        MIN_INTERVAL = 0.20  # 最小發送間隔 200ms
+        CHANGE_THRESHOLD = 15  # 最小變化閾值（約 6% 變化才發送）
+        LARGE_CHANGE = 80  # 大變化閾值（約 30% 變化可提前發送）
         
         if state['target_pos'] is not None:
             # 計算新目標和當前目標的差異
