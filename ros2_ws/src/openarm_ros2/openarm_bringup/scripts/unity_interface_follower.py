@@ -443,19 +443,22 @@ class UnityFollowerInterface(Node):
         
         result = self.zlgcan.transmit_fd(can_id, bytes(data))
         
-        # Debug: 左右手分開計數
+        # Debug: 左右手分開計數，每 10 次輸出詳細資訊
         if can_id == DEXTEROUS_HAND_LEFT_CAN_ID:
             if not hasattr(self, '_send_left_count'):
                 self._send_left_count = 0
             self._send_left_count += 1
-            if self._send_left_count % 25 == 0:
-                self.get_logger().info(f"[LEFT_HAND] pos={pos_values}, result={result}")
+            if self._send_left_count % 10 == 0:
+                # 顯示完整封包內容
+                data_hex = ' '.join(f'{b:02X}' for b in data[:16])
+                self.get_logger().info(f"[LEFT_HAND] len={len(data)}, data={data_hex}..., result={result}")
         else:
             if not hasattr(self, '_send_right_count'):
                 self._send_right_count = 0
             self._send_right_count += 1
-            if self._send_right_count % 25 == 0:
-                self.get_logger().info(f"[RIGHT_HAND] pos={pos_values}, result={result}")
+            if self._send_right_count % 10 == 0:
+                data_hex = ' '.join(f'{b:02X}' for b in data[:16])
+                self.get_logger().info(f"[RIGHT_HAND] len={len(data)}, data={data_hex}..., result={result}")
     
     def _clamp_position(self, pos: float, joint_idx: int, limits: dict) -> float:
         """限制位置在安全範圍內"""
