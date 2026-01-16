@@ -54,11 +54,13 @@ GRIPPER_SEND_ID = 0x08
 GRIPPER_RECV_ID = 0x18
 
 # ============================================================================
-# 末端執行器切換配置
+# 末端執行器配置（並存模式）
 # ============================================================================
-# 切換開關: "gripper" = 舊夾爪 (達妙 MIT), "dexterous_hand" = 靈巧手 (USB CANFD)
-RIGHT_END_EFFECTOR_TYPE = "gripper"  # 右手: "gripper" 或 "dexterous_hand"
-LEFT_END_EFFECTOR_TYPE = "gripper"   # 左手: "gripper" 或 "dexterous_hand"
+# 夾爪和靈巧手可同時啟用，根據收到的命令自動選擇：
+#   - L_EE / R_EE 命令 → 控制夾爪
+#   - L_F1~L_F6 / R_F1~R_F6 命令 → 控制靈巧手
+ENABLE_GRIPPER = True         # 啟用夾爪控制
+ENABLE_DEXTEROUS_HAND = True  # 啟用靈巧手控制（需要 USB CANFD 設備）
 
 # 靈巧手配置（使用 USB CANFD DEBUG 設備 via ZLGCAN SDK）
 # 注意：左右靈巧手共用同一個 USB CANFD 設備，透過不同 CAN ID 區分
