@@ -456,28 +456,25 @@ class UnityFollowerInterface(Node):
             pos_value = max(0, min(255, pos_value))
             pos_values.append(pos_value)
         
-        # 發送策略：固定最小間隔 + 大變化立即發送
-        MIN_INTERVAL = 0.20  # 最小發送間隔 200ms
-        CHANGE_THRESHOLD = 15  # 最小變化閾值（約 6% 變化才發送）
-        LARGE_CHANGE = 80  # 大變化閾值（約 30% 變化可提前發送）
+        # 發送策略：穩定後發送
+        # 只有當目標位置穩定一段時間後才發送，避免塞車
+        MIN_INTERVAL = 0.25  # 最小發送間隔 250ms
+        STABLE_TIME = 0.10   # 穩定時間 100ms
+        CHANGE_THRESHOLD = 10  # 變化閾值
         
         if state['target_pos'] is not None:
+            time_since_last = current_time - state.get('last_send_time', 0)
+            
             # 計算新目標和當前目標的差異
             target_change = max(abs(pos_values[i] - state['target_pos'][i]) for i in range(6))
-            time_since_last = current_time - state.get('last_send_time', 0)
             
             # 如果變化太小，跳過
             if target_change < CHANGE_THRESHOLD:
                 return False
             
-            # 大變化：立即發送（但仍需等待最小間隔的一半）
-            if target_change >= LARGE_CHANGE:
-                if time_since_last < MIN_INTERVAL / 2:
-                    return False
-            else:
-                # 小/中變化：等待完整的最小間隔
-                if time_since_last < MIN_INTERVAL:
-                    return False
+            # 必須等待最小間隔
+            if time_since_last < MIN_INTERVAL:
+                return False
         
         # 更新狀態
         state['last_pos'] = state['target_pos']
