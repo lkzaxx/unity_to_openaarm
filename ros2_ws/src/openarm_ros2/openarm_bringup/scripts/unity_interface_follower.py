@@ -408,7 +408,7 @@ class UnityFollowerInterface(Node):
             self._ehand_log_count = 0
         self._ehand_log_count += 1
         if self._ehand_log_count % 30 == 0:
-        if self._ehand_log_count % 30 == 0:
+
             # 顯示所有 6 個手指數值，保留 2 位小數
             l_str = str([round(x, 2) for x in self.left_hand_target])
             r_str = str([round(x, 2) for x in self.right_hand_target])
