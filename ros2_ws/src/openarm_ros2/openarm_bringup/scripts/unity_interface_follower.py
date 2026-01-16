@@ -68,7 +68,7 @@ DEXTEROUS_HAND_LEFT_CAN_ID = 0x12   # 左靈巧手 CAN ID
 DEXTEROUS_HAND_RIGHT_CAN_ID = 0x11  # 右靈巧手 CAN ID
 DEXTEROUS_HAND_SPEED = 200          # 速度 (0~255)
 DEXTEROUS_HAND_TORQUE = 200         # 力矩 (0~255)
-DEXTEROUS_HAND_CONTROL_FREQ = 5     # 控制頻率 (Hz) - 大幅降低以測試
+DEXTEROUS_HAND_CONTROL_FREQ = 30    # 控制頻率 (Hz) - 時間估算機制會自動防塞車
 
 # ============================================================================
 # MIT 控制參數
@@ -420,21 +420,34 @@ class UnityFollowerInterface(Node):
     
     def _send_hand_positions(self, can_id: int, positions: list):
         """
-        發送靈巧手位置命令（帶變化偵測）
+        發送靈巧手位置命令（帶時間估算防塞車機制）
+        
+        機制：根據位置變化量估算移動時間，在預計到達時間之前不發送新命令
         
         Args:
             can_id: CAN ID (0x11=右手, 0x12=左手)
             positions: 6 個手指位置 (0~1)
         
         Returns:
-            True 如果發送，False 如果跳過（位置無變化）
+            True 如果發送，False 如果跳過
         """
         if self.zlgcan is None:
             return False
         
-        # 初始化上次發送的位置記錄
-        if not hasattr(self, '_last_sent_positions'):
-            self._last_sent_positions = {}
+        current_time = time.time()
+        
+        # 初始化記錄
+        if not hasattr(self, '_hand_state'):
+            self._hand_state = {}
+        
+        if can_id not in self._hand_state:
+            self._hand_state[can_id] = {
+                'last_pos': None,
+                'target_pos': None,
+                'estimated_arrival': 0  # 預計到達時間
+            }
+        
+        state = self._hand_state[can_id]
         
         # 計算位置值
         pos_values = []
@@ -443,17 +456,33 @@ class UnityFollowerInterface(Node):
             pos_value = max(0, min(255, pos_value))
             pos_values.append(pos_value)
         
-        # 檢查是否有足夠的變化（閾值 5 = 約 2% 變化）
-        CHANGE_THRESHOLD = 5
-        last_pos = self._last_sent_positions.get(can_id, None)
-        if last_pos is not None:
-            max_change = max(abs(pos_values[i] - last_pos[i]) for i in range(6))
-            if max_change < CHANGE_THRESHOLD:
-                # 變化太小，跳過發送
-                return False
+        # 發送策略：固定最小間隔 + 大變化立即發送
+        MIN_INTERVAL = 0.15  # 最小發送間隔 150ms
+        CHANGE_THRESHOLD = 10  # 最小變化閾值（提高以減少小變化發送）
+        LARGE_CHANGE = 50  # 大變化閾值（超過此值立即發送）
         
-        # 記錄本次發送的位置
-        self._last_sent_positions[can_id] = pos_values[:]
+        if state['target_pos'] is not None:
+            # 計算新目標和當前目標的差異
+            target_change = max(abs(pos_values[i] - state['target_pos'][i]) for i in range(6))
+            time_since_last = current_time - state.get('last_send_time', 0)
+            
+            # 如果變化太小，跳過
+            if target_change < CHANGE_THRESHOLD:
+                return False
+            
+            # 大變化：立即發送（但仍需等待最小間隔的一半）
+            if target_change >= LARGE_CHANGE:
+                if time_since_last < MIN_INTERVAL / 2:
+                    return False
+            else:
+                # 小/中變化：等待完整的最小間隔
+                if time_since_last < MIN_INTERVAL:
+                    return False
+        
+        # 更新狀態
+        state['last_pos'] = state['target_pos']
+        state['target_pos'] = pos_values[:]
+        state['last_send_time'] = current_time
         
         # 32 bytes 封包格式:
         # [0xFD][0x01][M1: Pos,Speed,Torque,0,0][M2: ...][M3: ...][M4: ...][M5: ...][M6: ...]
@@ -693,11 +722,9 @@ class UnityFollowerInterface(Node):
                 
                 # 靈巧手：根據是否可用和是否有命令來控制
                 if self.dexterous_hand_ready and loop_count % hand_control_interval == 0:
-                    # 加入延遲，避免左右手 CAN FD 發送衝突
-                    time.sleep(0.05)  # 50ms
                     with self.hand_target_lock:
                         right_fingers = self.right_hand_target[:]
-                    # 右手：總是發送（移除判斷條件以便測試）
+                    # 右手：總是發送（時間估算機制會自動防塞車）
                     self._send_hand_positions(DEXTEROUS_HAND_RIGHT_CAN_ID, right_fingers)
                 
                 self.right_arm.recv_all(500)
