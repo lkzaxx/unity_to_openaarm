@@ -408,7 +408,11 @@ class UnityFollowerInterface(Node):
             self._ehand_log_count = 0
         self._ehand_log_count += 1
         if self._ehand_log_count % 30 == 0:
-            self.get_logger().info(f"[ehand] L={self.left_hand_target[:3]}, R={self.right_hand_target[:3]}")
+        if self._ehand_log_count % 30 == 0:
+            # 顯示所有 6 個手指數值，保留 2 位小數
+            l_str = str([round(x, 2) for x in self.left_hand_target])
+            r_str = str([round(x, 2) for x in self.right_hand_target])
+            self.get_logger().info(f"[ehand] L={l_str}, R={r_str}")
     
     def _send_hand_home(self, can_id: int):
         """發送靈巧手回零命令"""
@@ -458,7 +462,7 @@ class UnityFollowerInterface(Node):
         
         # 發送策略：穩定後發送
         # 只有當目標位置穩定一段時間後才發送，避免塞車
-        MIN_INTERVAL = 0.50  # 最小發送間隔 500ms（測試用）
+        MIN_INTERVAL = 0.25  # 最小發送間隔 250ms
         STABLE_TIME = 0.10   # 穩定時間 100ms
         CHANGE_THRESHOLD = 10  # 變化閾值
         
