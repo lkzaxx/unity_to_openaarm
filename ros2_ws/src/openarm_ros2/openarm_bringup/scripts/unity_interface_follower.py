@@ -68,7 +68,7 @@ DEXTEROUS_HAND_LEFT_CAN_ID = 0x12   # 左靈巧手 CAN ID
 DEXTEROUS_HAND_RIGHT_CAN_ID = 0x11  # 右靈巧手 CAN ID
 DEXTEROUS_HAND_SPEED = 200          # 速度 (0~255)
 DEXTEROUS_HAND_TORQUE = 200         # 力矩 (0~255)
-DEXTEROUS_HAND_CONTROL_FREQ = 50    # 控制頻率 (Hz)
+DEXTEROUS_HAND_CONTROL_FREQ = 20    # 控制頻率 (Hz) - 降低以避免 CAN FD 衝突
 
 # ============================================================================
 # MIT 控制參數
@@ -668,6 +668,8 @@ class UnityFollowerInterface(Node):
                 
                 # 靈巧手：根據是否可用和是否有命令來控制
                 if self.dexterous_hand_ready and loop_count % hand_control_interval == 0:
+                    # 加入小延遲，避免左右手 CAN FD 發送衝突
+                    time.sleep(0.005)  # 5ms
                     with self.hand_target_lock:
                         right_fingers = self.right_hand_target[:]
                     # 右手：總是發送（移除判斷條件以便測試）
