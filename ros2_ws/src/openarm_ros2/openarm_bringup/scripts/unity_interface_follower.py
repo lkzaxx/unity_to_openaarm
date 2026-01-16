@@ -402,6 +402,13 @@ class UnityFollowerInterface(Node):
                     finger_idx = int(name.split('_F')[1]) - 1
                     if 0 <= finger_idx < 6:
                         self.right_hand_target[finger_idx] = max(0.0, min(1.0, msg.position[i]))
+        
+        # Debug: 每 30 次輸出一次
+        if not hasattr(self, '_ehand_log_count'):
+            self._ehand_log_count = 0
+        self._ehand_log_count += 1
+        if self._ehand_log_count % 30 == 0:
+            self.get_logger().info(f"[ehand] L={self.left_hand_target[:3]}, R={self.right_hand_target[:3]}")
     
     def _send_hand_home(self, can_id: int):
         """發送靈巧手回零命令"""
@@ -426,13 +433,22 @@ class UnityFollowerInterface(Node):
         # [0xFD][0x01][M1: Pos,Speed,Torque,0,0][M2: ...][M3: ...][M4: ...][M5: ...][M6: ...]
         data = [0xFD, 0x01]  # 全選寫入 + 位置模式
         
+        pos_values = []
         for i in range(6):
             pos_value = int(positions[i] * 255)  # 0~1 -> 0~255
             pos_value = max(0, min(255, pos_value))
+            pos_values.append(pos_value)
             # 每個馬達 5 bytes: Position, Speed, Torque, Reserved, Reserved
             data.extend([pos_value, DEXTEROUS_HAND_SPEED, DEXTEROUS_HAND_TORQUE, 0xFF, 0xFF])
         
-        self.zlgcan.transmit_fd(can_id, bytes(data))
+        result = self.zlgcan.transmit_fd(can_id, bytes(data))
+        
+        # Debug: 每 50 次輸出一次
+        if not hasattr(self, '_send_log_count'):
+            self._send_log_count = 0
+        self._send_log_count += 1
+        if self._send_log_count % 50 == 0:
+            self.get_logger().info(f"[_send_hand] CAN=0x{can_id:02X}, pos={pos_values}, result={result}")
     
     def _clamp_position(self, pos: float, joint_idx: int, limits: dict) -> float:
         """限制位置在安全範圍內"""
