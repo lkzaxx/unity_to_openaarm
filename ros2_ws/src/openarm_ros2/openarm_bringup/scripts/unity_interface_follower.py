@@ -56,16 +56,17 @@ GRIPPER_RECV_ID = 0x18
 # ============================================================================
 # 末端執行器切換配置
 # ============================================================================
-# 切換開關: "gripper" = 舊夾爪 (達妙 MIT), "dexterous_hand" = 靈巧手 (32B 封包)
+# 切換開關: "gripper" = 舊夾爪 (達妙 MIT), "dexterous_hand" = 靈巧手 (USB CANFD)
 RIGHT_END_EFFECTOR_TYPE = "gripper"  # 右手: "gripper" 或 "dexterous_hand"
-LEFT_END_EFFECTOR_TYPE = "gripper"   # 左手: 保持舊夾爪
+LEFT_END_EFFECTOR_TYPE = "gripper"   # 左手: "gripper" 或 "dexterous_hand"
 
-# 靈巧手配置（僅 END_EFFECTOR_TYPE == "dexterous_hand" 時使用）
-DEXTEROUS_HAND_CAN_INTERFACE = "can0"  # TODO: 確認實際介面
-DEXTEROUS_HAND_CAN_ID = 0x01           # TODO: 確認實際 CAN ID
-DEXTEROUS_HAND_SPEED = 128             # 速度 (0~255)
-DEXTEROUS_HAND_TORQUE = 128            # 力矩 (0~255)
-DEXTEROUS_HAND_CONTROL_FREQ = 50       # 控制頻率 (Hz)
+# 靈巧手配置（使用 USB CANFD DEBUG 設備 via ZLGCAN SDK）
+# 注意：左右靈巧手共用同一個 USB CANFD 設備，透過不同 CAN ID 區分
+DEXTEROUS_HAND_LEFT_CAN_ID = 0x12   # 左靈巧手 CAN ID
+DEXTEROUS_HAND_RIGHT_CAN_ID = 0x11  # 右靈巧手 CAN ID
+DEXTEROUS_HAND_SPEED = 128          # 速度 (0~255)
+DEXTEROUS_HAND_TORQUE = 128         # 力矩 (0~255)
+DEXTEROUS_HAND_CONTROL_FREQ = 50    # 控制頻率 (Hz)
 
 # ============================================================================
 # MIT 控制參數
@@ -196,24 +197,54 @@ class UnityFollowerInterface(Node):
         self.right_arm.init_arm_motors(MOTOR_TYPES, SEND_IDS, RECV_IDS)
         self.right_arm.init_gripper_motor(GRIPPER_MOTOR_TYPE, GRIPPER_SEND_ID, GRIPPER_RECV_ID)
         
-        # === 初始化靈巧手（如果啟用）===
+        # === 初始化靈巧手（使用 USB CANFD via ZLGCAN SDK）===
+        self.left_dexterous_hand = None
         self.right_dexterous_hand = None
-        if RIGHT_END_EFFECTOR_TYPE == "dexterous_hand":
+        self.zlgcan = None  # 共用的 ZLGCAN 設備
+        self.left_hand_target = [0.0] * 6  # 6 個手指 (0~1)
+        self.right_hand_target = [0.0] * 6
+        self.hand_target_lock = threading.Lock()
+        
+        # 如果任一手使用靈巧手，初始化 ZLGCAN
+        if LEFT_END_EFFECTOR_TYPE == "dexterous_hand" or RIGHT_END_EFFECTOR_TYPE == "dexterous_hand":
             try:
-                from openarm.can.dexterous_hand import DexterousHand
-                self.get_logger().info(f"Initializing Right Dexterous Hand on {DEXTEROUS_HAND_CAN_INTERFACE}...")
-                self.right_dexterous_hand = DexterousHand(
-                    DEXTEROUS_HAND_CAN_INTERFACE, 
-                    can_id=DEXTEROUS_HAND_CAN_ID
-                )
-                self.right_dexterous_hand.home()
-                time.sleep(1.0)
-                self.get_logger().info("✅ Right Dexterous Hand initialized!")
+                # 從 usbcanfd_scan.py 導入 ZLGCAN
+                import sys
+                sys.path.insert(0, '/home/idaka/openarm_can/setup')
+                from usbcanfd_scan import ZLGCAN, MODE_NORMAL
+                
+                self.get_logger().info("Initializing USB CANFD for Dexterous Hand...")
+                self.zlgcan = ZLGCAN()
+                if self.zlgcan.open_device():
+                    self.zlgcan.set_baudrate(0, 1000000, 5000000)  # 1Mbps/5Mbps
+                    self.zlgcan.init_channel(0, MODE_NORMAL)
+                    self.zlgcan.start_can()
+                    self.get_logger().info("✅ USB CANFD initialized!")
+                    
+                    # 標記哪隻手使用靈巧手
+                    if LEFT_END_EFFECTOR_TYPE == "dexterous_hand":
+                        self.left_dexterous_hand = True
+                        self._send_hand_home(DEXTEROUS_HAND_LEFT_CAN_ID)
+                        self.get_logger().info(f"✅ Left Dexterous Hand enabled (CAN ID: 0x{DEXTEROUS_HAND_LEFT_CAN_ID:02X})")
+                    if RIGHT_END_EFFECTOR_TYPE == "dexterous_hand":
+                        self.right_dexterous_hand = True
+                        self._send_hand_home(DEXTEROUS_HAND_RIGHT_CAN_ID)
+                        self.get_logger().info(f"✅ Right Dexterous Hand enabled (CAN ID: 0x{DEXTEROUS_HAND_RIGHT_CAN_ID:02X})")
+                    
+                    time.sleep(2.0)  # 等待回零完成
+                else:
+                    self.get_logger().error("❌ Failed to open USB CANFD device")
+                    self.zlgcan = None
             except Exception as e:
-                self.get_logger().error(f"❌ Failed to initialize Dexterous Hand: {e}")
-                self.get_logger().warn("Falling back to gripper mode")
+                self.get_logger().error(f"❌ Failed to initialize ZLGCAN: {e}")
+                self.get_logger().warn("Falling back to gripper mode for dexterous hands")
+                self.zlgcan = None
+                self.left_dexterous_hand = None
                 self.right_dexterous_hand = None
-        else:
+        
+        if LEFT_END_EFFECTOR_TYPE == "gripper":
+            self.get_logger().info("Using original gripper for left arm")
+        if RIGHT_END_EFFECTOR_TYPE == "gripper":
             self.get_logger().info("Using original gripper for right arm")
         
         # === 啟用馬達 ===
@@ -239,6 +270,14 @@ class UnityFollowerInterface(Node):
             String, '/unity/heartbeat',
             self.heartbeat_callback, 10
         )
+        
+        # === 訂閱靈巧手命令（如果啟用）===
+        if self.zlgcan is not None:
+            self.ehand_sub = self.create_subscription(
+                JointState, '/unity/ehand_commands',
+                self.ehand_callback, 10
+            )
+            self.get_logger().info("✓ Subscribed to /unity/ehand_commands")
         
         # === 發布 JointState 給 Unity ===
         self.joint_state_pub = self.create_publisher(
@@ -352,6 +391,54 @@ class UnityFollowerInterface(Node):
         if not self.unity_connected:
             self.unity_connected = True
             self.get_logger().info("✅ Unity heartbeat received!")
+    
+    def ehand_callback(self, msg: JointState):
+        """靈巧手命令回調"""
+        self.last_unity_time = time.time()
+        
+        with self.hand_target_lock:
+            for i, name in enumerate(msg.name):
+                if name.startswith('L_F'):
+                    # L_F1 ~ L_F6
+                    finger_idx = int(name.split('_F')[1]) - 1
+                    if 0 <= finger_idx < 6:
+                        self.left_hand_target[finger_idx] = max(0.0, min(1.0, msg.position[i]))
+                elif name.startswith('R_F'):
+                    # R_F1 ~ R_F6
+                    finger_idx = int(name.split('_F')[1]) - 1
+                    if 0 <= finger_idx < 6:
+                        self.right_hand_target[finger_idx] = max(0.0, min(1.0, msg.position[i]))
+    
+    def _send_hand_home(self, can_id: int):
+        """發送靈巧手回零命令"""
+        if self.zlgcan is None:
+            return
+        # 回零命令: 0xFD 0x04 + 30 bytes 0xFF
+        cmd = bytes([0xFD, 0x04] + [0xFF] * 30)
+        self.zlgcan.transmit_fd(can_id, cmd)
+    
+    def _send_hand_positions(self, can_id: int, positions: list):
+        """
+        發送靈巧手位置命令
+        
+        Args:
+            can_id: CAN ID (0x11=右手, 0x12=左手)
+            positions: 6 個手指位置 (0~1)
+        """
+        if self.zlgcan is None:
+            return
+        
+        # 32 bytes 封包格式:
+        # [0xFD][0x01][M1: Pos,Speed,Torque,0,0][M2: ...][M3: ...][M4: ...][M5: ...][M6: ...]
+        data = [0xFD, 0x01]  # 全選寫入 + 位置模式
+        
+        for i in range(6):
+            pos_value = int(positions[i] * 255)  # 0~1 -> 0~255
+            pos_value = max(0, min(255, pos_value))
+            # 每個馬達 5 bytes: Position, Speed, Torque, Reserved, Reserved
+            data.extend([pos_value, DEXTEROUS_HAND_SPEED, DEXTEROUS_HAND_TORQUE, 0xFF, 0xFF])
+        
+        self.zlgcan.transmit_fd(can_id, bytes(data))
     
     def _clamp_position(self, pos: float, joint_idx: int, limits: dict) -> float:
         """限制位置在安全範圍內"""
@@ -536,28 +623,32 @@ class UnityFollowerInterface(Node):
             
             # 發送到馬達
             try:
-                # === 左手臂 + 夾爪 ===
+                # === 左手臂 ===
                 self.left_arm.get_arm().mit_control_all(left_arm_cmds)
-                self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
+                
+                # === 左手末端執行器 ===
+                if self.left_dexterous_hand:
+                    # 靈巧手控制（較低頻率: 50Hz）
+                    if loop_count % hand_control_interval == 0:
+                        with self.hand_target_lock:
+                            left_fingers = self.left_hand_target[:]
+                        self._send_hand_positions(DEXTEROUS_HAND_LEFT_CAN_ID, left_fingers)
+                else:
+                    # 使用舊夾爪 (達妙 MIT 控制)
+                    self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
+                
                 self.left_arm.recv_all(500)
                 
                 # === 右手臂 ===
                 self.right_arm.get_arm().mit_control_all(right_arm_cmds)
                 
-                # === 右手末端執行器（切換邏輯）===
-                if self.right_dexterous_hand is not None:
+                # === 右手末端執行器 ===
+                if self.right_dexterous_hand:
                     # 靈巧手控制（較低頻率: 50Hz）
                     if loop_count % hand_control_interval == 0:
-                        # 將 Unity 的 gripper 值 (弧度) 轉換為 grip_value (0~1)
-                        # 原本: right_grip 是馬達弧度，範圍約 0 ~ -1.0472
-                        # 轉換: grip_value = |right_grip| / 1.0472
-                        grip_value = abs(right_grip) / 1.0472
-                        grip_value = max(0.0, min(1.0, grip_value))
-                        self.right_dexterous_hand.set_grip(
-                            grip_value,
-                            speed=DEXTEROUS_HAND_SPEED,
-                            torque=DEXTEROUS_HAND_TORQUE
-                        )
+                        with self.hand_target_lock:
+                            right_fingers = self.right_hand_target[:]
+                        self._send_hand_positions(DEXTEROUS_HAND_RIGHT_CAN_ID, right_fingers)
                 else:
                     # 使用舊夾爪 (達妙 MIT 控制)
                     right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
@@ -678,14 +769,19 @@ class UnityFollowerInterface(Node):
         if self.control_thread.is_alive():
             self.control_thread.join(timeout=1.0)
         
-        # 關閉靈巧手（如果有）
-        if self.right_dexterous_hand is not None:
+        # 關閉靈巧手（如果啟用）
+        if self.zlgcan is not None:
             try:
-                self.get_logger().info("Opening dexterous hand before shutdown...")
-                self.right_dexterous_hand.open()
-                time.sleep(0.5)
-                self.right_dexterous_hand.disconnect()
-                self.get_logger().info("Dexterous hand disconnected")
+                self.get_logger().info("Opening dexterous hands before shutdown...")
+                # 發送張開命令 (0xFD 0x02)
+                cmd_open = bytes([0xFD, 0x02] + [0xFF] * 30)
+                if self.left_dexterous_hand:
+                    self.zlgcan.transmit_fd(DEXTEROUS_HAND_LEFT_CAN_ID, cmd_open)
+                if self.right_dexterous_hand:
+                    self.zlgcan.transmit_fd(DEXTEROUS_HAND_RIGHT_CAN_ID, cmd_open)
+                time.sleep(1.0)
+                self.zlgcan.close()
+                self.get_logger().info("USB CANFD closed")
             except Exception as e:
                 self.get_logger().warn(f"Error closing dexterous hand: {e}")
         
