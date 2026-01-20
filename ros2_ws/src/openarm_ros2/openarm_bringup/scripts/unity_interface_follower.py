@@ -418,8 +418,8 @@ class UnityFollowerInterface(Node):
         """發送靈巧手回零命令"""
         if self.zlgcan is None:
             return
-        # 回零命令: 0xFD 0x04 + 30 bytes 0xFF
-        cmd = bytes([0xFD, 0x04] + [0xFF] * 30)
+        # 回零命令: 0xFD 0x04 + 30 bytes 0x00（手冊規範 reserved 填 0x00）
+        cmd = bytes([0xFD, 0x04] + [0x00] * 30)
         self.zlgcan.transmit_fd(can_id, cmd)
     
     def _send_hand_positions(self, can_id: int, positions: list):
@@ -460,24 +460,31 @@ class UnityFollowerInterface(Node):
             pos_value = max(0, min(255, pos_value))
             pos_values.append(pos_value)
         
-        # 發送策略：穩定後發送
-        # 只有當目標位置穩定一段時間後才發送，避免塞車
-        MIN_INTERVAL = 0.25  # 最小發送間隔 250ms
-        STABLE_TIME = 0.10   # 穩定時間 100ms
-        CHANGE_THRESHOLD = 10  # 變化閾值
+        # 發送策略 A：動態等待時間
+        # 根據上次發送的移動距離估算所需時間，等待完成後才發送下一個命令
+        MAX_TRAVEL_TIME = 1.5  # 全程（0→255）移動時間（秒）
+        MIN_INTERVAL = 0.1    # 最小發送間隔（秒）
+        CHANGE_THRESHOLD = 5  # 變化閾值（小於此值視為沒變化）
         
         if state['target_pos'] is not None:
             time_since_last = current_time - state.get('last_send_time', 0)
             
-            # 計算新目標和當前目標的差異
+            # 計算新目標和「已發送目標」的差異
             target_change = max(abs(pos_values[i] - state['target_pos'][i]) for i in range(6))
             
-            # 如果變化太小，跳過
+            # 如果目標沒變（或變化很小），不重複發送
             if target_change < CHANGE_THRESHOLD:
                 return False
             
-            # 必須等待最小間隔
-            if time_since_last < MIN_INTERVAL:
+            # 計算上次動作預估需要的時間
+            if state['last_pos'] is not None:
+                last_move = max(abs(state['target_pos'][i] - state['last_pos'][i]) for i in range(6))
+                estimated_time = (last_move / 255.0) * MAX_TRAVEL_TIME + MIN_INTERVAL
+            else:
+                estimated_time = MIN_INTERVAL
+            
+            # 等待上次動作完成
+            if time_since_last < estimated_time:
                 return False
         
         # 更新狀態
@@ -491,7 +498,8 @@ class UnityFollowerInterface(Node):
         
         for pos_value in pos_values:
             # 每個馬達 5 bytes: Position, Speed, Torque, Reserved, Reserved
-            data.extend([pos_value, DEXTEROUS_HAND_SPEED, DEXTEROUS_HAND_TORQUE, 0xFF, 0xFF])
+            # 手冊規範 reserved 填 0x00
+            data.extend([pos_value, DEXTEROUS_HAND_SPEED, DEXTEROUS_HAND_TORQUE, 0x00, 0x00])
         
         result = self.zlgcan.transmit_fd(can_id, bytes(data))
         
@@ -848,7 +856,7 @@ class UnityFollowerInterface(Node):
             try:
                 self.get_logger().info("Opening dexterous hands before shutdown...")
                 # 發送張開命令 (0xFD 0x02)
-                cmd_open = bytes([0xFD, 0x02] + [0xFF] * 30)
+                cmd_open = bytes([0xFD, 0x02] + [0x00] * 30)
                 self.zlgcan.transmit_fd(DEXTEROUS_HAND_LEFT_CAN_ID, cmd_open)
                 self.zlgcan.transmit_fd(DEXTEROUS_HAND_RIGHT_CAN_ID, cmd_open)
                 time.sleep(1.0)
