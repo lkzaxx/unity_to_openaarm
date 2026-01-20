@@ -17,6 +17,7 @@ from std_msgs.msg import String
 import openarm_can as oa
 import threading
 import time
+import os
 
 # Ruckig 軌跡平滑（條件 import）
 try:
@@ -24,6 +25,29 @@ try:
     RUCKIG_AVAILABLE = True
 except ImportError:
     RUCKIG_AVAILABLE = False
+
+# ===== [JOINT_LOGGER] 關節數據記錄 - 開始 =====
+# 設為 False 可完全停用記錄功能
+ENABLE_JOINT_LOGGING = True
+LOG_FREQUENCY = 50          # 記錄頻率 (Hz)
+LOG_MAX_DURATION = 60.0     # 最大記錄時長 (秒)
+AUTO_PLOT_ON_SHUTDOWN = True  # 關閉時自動繪圖
+
+if ENABLE_JOINT_LOGGING:
+    try:
+        import sys
+        import os
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        if _script_dir not in sys.path:
+            sys.path.insert(0, _script_dir)
+        from utils.joint_data_logger import JointDataLogger
+        JOINT_LOGGER_AVAILABLE = True
+    except ImportError as e:
+        print(f"[WARN] JointDataLogger 無法載入: {e}")
+        JOINT_LOGGER_AVAILABLE = False
+else:
+    JOINT_LOGGER_AVAILABLE = False
+# ===== [JOINT_LOGGER] 關節數據記錄 - 結束 =====
 
 # ============================================================================
 # 硬體配置
@@ -278,6 +302,31 @@ class UnityFollowerInterface(Node):
             JointState, '/openarm/joint_states', 10
         )
         
+        # === Ruckig 初始化 ===
+        if USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE:
+            self._init_ruckig()
+        elif USE_RUCKIG_SMOOTHING and not RUCKIG_AVAILABLE:
+            self.get_logger().warn("⚠️ Ruckig not available, falling back to rate limiting")
+        
+        # ===== [JOINT_LOGGER] 初始化 - 開始 =====
+        # 注意：必須在 control_thread.start() 之前初始化，避免競爭條件
+        self.joint_logger = None
+        if ENABLE_JOINT_LOGGING and JOINT_LOGGER_AVAILABLE:
+            try:
+                utils_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'utils')
+                self.joint_logger = JointDataLogger(
+                    log_frequency=LOG_FREQUENCY,
+                    control_frequency=CONTROL_FREQUENCY,
+                    max_duration=LOG_MAX_DURATION,
+                    save_dir=utils_dir
+                )
+                self.get_logger().info(f"✅ JointDataLogger 初始化完成")
+                self.get_logger().info(f"   記錄頻率: {LOG_FREQUENCY} Hz, 最大時長: {LOG_MAX_DURATION} 秒")
+            except Exception as e:
+                self.get_logger().warn(f"⚠️ JointDataLogger 初始化失敗: {e}")
+                self.joint_logger = None
+        # ===== [JOINT_LOGGER] 初始化 - 結束 =====
+        
         # === 控制迴圈（獨立執行緒） ===
         self.running = True
         self.control_thread = threading.Thread(target=self.control_loop, daemon=True)
@@ -292,12 +341,6 @@ class UnityFollowerInterface(Node):
         self.get_logger().info(f"   USE_STATE_CACHE: {USE_STATE_CACHE}")
         self.get_logger().info(f"   USE_DEADLINE_TIMING: {USE_DEADLINE_TIMING}")
         self.get_logger().info(f"   USE_RUCKIG_SMOOTHING: {USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE}")
-        
-        # === Ruckig 初始化 ===
-        if USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE:
-            self._init_ruckig()
-        elif USE_RUCKIG_SMOOTHING and not RUCKIG_AVAILABLE:
-            self.get_logger().warn("⚠️ Ruckig not available, falling back to rate limiting")
     
     def _read_initial_positions(self):
         """讀取當前馬達位置作為初始目標（避免啟動時跳動）"""
@@ -354,6 +397,14 @@ class UnityFollowerInterface(Node):
         
         self.get_logger().info("✅ Ruckig initialized!")
     
+    # ===== [JOINT_LOGGER] 開始記錄輔助方法 - 開始 =====
+    def _start_joint_logging(self):
+        """開始關節數據記錄（避免重複開始）"""
+        if self.joint_logger is not None and not self.joint_logger.is_recording:
+            self.joint_logger.start()
+            self.get_logger().info("📊 JointDataLogger 開始記錄")
+    # ===== [JOINT_LOGGER] 開始記錄輔助方法 - 結束 =====
+    
     def unity_callback(self, msg: JointState):
         """Unity 傳來目標時，只更新 target（不阻塞）"""
         self.last_unity_time = time.time()
@@ -361,6 +412,8 @@ class UnityFollowerInterface(Node):
         if not self.unity_connected:
             self.unity_connected = True
             self.get_logger().info("✅ Unity connected!")
+            # ===== [JOINT_LOGGER] Unity 連線時開始記錄 =====
+            self._start_joint_logging()
         
         with self.target_lock:
             for i, name in enumerate(msg.name):
@@ -385,10 +438,18 @@ class UnityFollowerInterface(Node):
         if not self.unity_connected:
             self.unity_connected = True
             self.get_logger().info("✅ Unity heartbeat received!")
+            # ===== [JOINT_LOGGER] 心跳連線時開始記錄 =====
+            self._start_joint_logging()
     
     def ehand_callback(self, msg: JointState):
         """靈巧手命令回調"""
         self.last_unity_time = time.time()
+        
+        # ===== [JOINT_LOGGER] ehand 連線時開始記錄 =====
+        if not self.unity_connected:
+            self.unity_connected = True
+            self.get_logger().info("✅ Unity ehand connected!")
+            self._start_joint_logging()
         
         with self.hand_target_lock:
             for i, name in enumerate(msg.name):
@@ -738,6 +799,31 @@ class UnityFollowerInterface(Node):
                 
                 self.right_arm.recv_all(500)
                 
+                # ===== [JOINT_LOGGER] 記錄數據 - 開始 =====
+                if self.joint_logger is not None and self.joint_logger.is_recording:
+                    try:
+                        # 取得 Unity 原始目標（未經平滑）
+                        with self.target_lock:
+                            left_unity = self.left_target[:]
+                            right_unity = self.right_target[:]
+                        
+                        # 取得 OpenArm 實際位置
+                        left_motors = self.left_arm.get_arm().get_motors()
+                        right_motors = self.right_arm.get_arm().get_motors()
+                        left_actual = [m.get_position() for m in left_motors]
+                        right_actual = [m.get_position() for m in right_motors]
+                        
+                        # 記錄
+                        self.joint_logger.log(
+                            left_unity_target=left_unity,
+                            left_actual=left_actual,
+                            right_unity_target=right_unity,
+                            right_actual=right_actual
+                        )
+                    except Exception as e:
+                        pass  # 記錄失敗不影響控制迴圈
+                # ===== [JOINT_LOGGER] 記錄數據 - 結束 =====
+                
                 # === 狀態快取：在 recv_all 後更新快取 ===
                 if USE_STATE_CACHE:
                     with self.state_lock:
@@ -850,6 +936,32 @@ class UnityFollowerInterface(Node):
         
         if self.control_thread.is_alive():
             self.control_thread.join(timeout=1.0)
+        
+        # ===== [JOINT_LOGGER] 儲存數據並繪圖 - 開始 =====
+        if self.joint_logger is not None:
+            try:
+                self.joint_logger.stop()
+                stats = self.joint_logger.get_stats()
+                
+                if stats['count'] > 0:
+                    # 儲存數據
+                    data_file = self.joint_logger.save()
+                    self.get_logger().info(f"📊 數據已儲存: {data_file}")
+                    
+                    # 自動繪圖
+                    if AUTO_PLOT_ON_SHUTDOWN:
+                        try:
+                            from utils.plot_joint_comparison import plot_joint_comparison
+                            self.get_logger().info("🎨 正在繪製比較圖...")
+                            output_files = plot_joint_comparison(data_file, arm='both')
+                            self.get_logger().info(f"✅ 已產生 {len(output_files)} 張圖")
+                        except Exception as e:
+                            self.get_logger().warn(f"⚠️ 繪圖失敗: {e}")
+                else:
+                    self.get_logger().info("📊 無數據需要儲存")
+            except Exception as e:
+                self.get_logger().warn(f"⚠️ JointDataLogger 儲存失敗: {e}")
+        # ===== [JOINT_LOGGER] 儲存數據並繪圖 - 結束 =====
         
         # 關閉靈巧手（並存模式：張開兩隻手）
         if self.dexterous_hand_ready and self.zlgcan is not None:
