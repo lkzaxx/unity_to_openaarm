@@ -1,0 +1,8 @@
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\bin\x86\Release\ZLGCAN.exe.config
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\bin\x86\Release\ZLGCAN.exe
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\bin\x86\Release\ZLGCAN.pdb
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\obj\x86\Release\ZLGCANDemo.CANForm.resources
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\obj\x86\Release\ZLGCAN.Properties.Resources.resources
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\obj\x86\Release\ZLGCAN.csproj.GenerateResource.Cache
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\obj\x86\Release\ZLGCAN.exe
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2013_v1.4\ZLGCAN\obj\x86\Release\ZLGCAN.pdb

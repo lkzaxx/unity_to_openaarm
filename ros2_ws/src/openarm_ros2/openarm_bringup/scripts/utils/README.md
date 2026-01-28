@@ -18,7 +18,21 @@ scripts/utils/
 
 ### 1. 數據記錄 (JointDataLogger)
 
-記錄以下數據：
+#### 系統頻率與週期
+
+| 項目 | 頻率 | 週期 | 說明 |
+|------|------|------|------|
+| Unity 發送 | ~60 Hz | ~16.67 ms | Unity 傳送關節目標的頻率 |
+| OpenArm 控制 | 500 Hz | 2 ms | MIT 控制命令發送給馬達的頻率 |
+| 數據記錄 | 50 Hz | 20 ms | 每 10 次控制迴圈記錄一次 |
+| 最大記錄時長 | - | 60 秒 | 超過後自動停止記錄 |
+
+> 注意：
+> - Unity 的 60 Hz 是近似值，實際可能因網路延遲而有變化
+> - 記錄頻率可在 `unity_interface_follower.py` 中調整 `LOG_FREQUENCY` 參數（預設 50 Hz）
+
+#### 記錄的數據
+
 - **Unity 原始目標** (`left_unity_target`, `right_unity_target`): Unity 傳入的關節目標位置
 - **OpenArm 實際位置** (`left_actual`, `right_actual`): 馬達回傳的實際位置
 - **時間戳** (`timestamp`): 相對時間 (秒)

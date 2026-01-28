@@ -1,0 +1,148 @@
+﻿
+//以下部份为查看系统信息。可省略。
+ttc@ubuntu:~$ uname -a
+Linux ubuntu 4.4.0-21-generic #37-Ubuntu SMP Mon Apr 18 18:34:49 UTC 2016 i686 i686 i686 GNU/Linux
+ttc@ubuntu:~$ 
+
+ttc@ubuntu:~$ gcc -v
+Using built-in specs.
+COLLECT_GCC=gcc
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/i686-linux-gnu/5/lto-wrapper
+Target: i686-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.3.1-14ubuntu2' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-i386/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-i386 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-i386 --with-arch-directory=i386 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-targets=all --enable-multiarch --disable-werror --with-arch-32=i686 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=i686-linux-gnu --host=i686-linux-gnu --target=i686-linux-gnu
+Thread model: posix
+gcc version 5.3.1 20160413 (Ubuntu 5.3.1-14ubuntu2) 
+ttc@ubuntu:~$ 
+//以上部份为查看系统信息。可省略。
+
+//以下命令是查看USB设备信息，插上USB即可查找到ID 04d8:0053 Microchip Technology, Inc. 设备，无需安装USB驱动。USB驱动已集成在二次开发库中。
+ttc@ubuntu:~$ lsusb
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 002 Device 004: ID 04d8:0053 Microchip Technology, Inc. 
+Bus 002 Device 003: ID 0e0f:0002 VMware, Inc. Virtual USB Hub
+Bus 002 Device 002: ID 0e0f:0003 VMware, Inc. Virtual Mouse
+Bus 002 Device 001: ID 1d6b:0001 Linux Foundation 1.1 root hub
+ttc@ubuntu:~$ 
+//以上命令是查看USB设备信息，插上USB即可查找到ID 04d8:0053 Microchip Technology, Inc. 设备，无需安装USB驱动。USB驱动已集成在二次开发库中。
+
+//将controlcan文件夹放在桌面。把CAN1与CAN2对接，运行后，可以看到程序内置的发送数据，被另一个通道接收。
+ttc@ubuntu:~$ ls
+Desktop    Downloads         Music     Public     Videos
+Documents  examples.desktop  Pictures  Templates
+ttc@ubuntu:~$ cd \Desktop
+ttc@ubuntu:~/Desktop$ 
+ttc@ubuntu:~/Desktop$ ls
+controlcanfd
+ttc@ubuntu:~/Desktop$ 
+ttc@ubuntu:~/Desktop$ cd \controlcanfd
+ttc@ubuntu:~/Desktop/controlcanfd$ 
+ttc@ubuntu:~/Desktop/controlcanfd$ ls
+CMakeLists.txt  controlcanfd.h      main.cpp
+config.h        libcontrolcanfd.so  Makefile
+
+ttc@ubuntu:~/Desktop/controlcanfd$ gedit main.cpp
+
+//在此处修改测试样例程序C代码。main.cpp
+//保存，关闭C代码。main.cpp
+
+
+ttc@ubuntu:~/Desktop/controlcanfd$ 
+ttc@ubuntu:~/Desktop/controlcanfd$ ls
+CMakeLists.txt  controlcanfd.h      main.cpp
+config.h        libcontrolcanfd.so  Makefile
+ttc@ubuntu:~/Desktop/controlcanfd$ 
+ttc@ubuntu:~/Desktop/controlcanfd$ make clean && make
+ttc@ubuntu:~/Desktop/controlcanfd$ ./hello_cpp
+Hello, this is canfd test demo!
+ZCAN_OpenDevice Enter
+open_usb_device ret:0
+package_recv: buf[BEEF002001018001D6BFD6377C67796B59700C46CEF47C1A2CE546C07BE6FC8396A66FE5A36444A1EEF9DEAD]
+打开设备成功！
+package_recv: buf[BEEF004C01018005020002120000000255534243414E464432303234303830393434363955534243414E46440000000000000000000000000000000000000000000000000000000000000000414141414141414137ADDEAD]
+str_Serial_Num:USBCANFD202408094469
+str_hw_Type:USBCANFD
+zcan_get_device_inf return:1
+设备信息:
+hw_Version:200
+fw_Version:212
+dr_Version:121
+in_Version:103
+irq_Num:0
+can_Num:2
+str_Serial_Num:USBCANFD202408094469
+str_hw_Type:USBCANFD
+初始化通道1
+package_recv: buf[BEEF000001018002C0B1DEAD]
+package_recv: buf[BEEF000001018002C0B1DEAD]
+清除通道1滤波设置
+package_recv: buf[BEEF00020101800B7F003FC5DEAD]
+清除通道2滤波设置
+package_recv: buf[BEEF00020101800B7F003FC5DEAD]
+生效通道1滤波设置
+生效通道2滤波设置
+启动通道1
+package_recv: buf[BEEF000001018003C0B3DEAD]
+ZCAN_StartCAN can_ind:0
+begin pthread_create pthread_0
+thread_parameters argc_0:1
+thread_parameters argc_1:0
+thread_parameters add:0xc83b20
+thread_parameters argc_0 add:0xc83b28
+thread_parameters argc_1 add:0xc83b2c
+thread_parameters p_gvar add:0x7fae4edbb010
+thread_parameters p:0xc83b20
+my_recv_thread p_this:0x7fae4edbb010
+my_recv_thread p_this:0x7fae4edbb010
+my_recv_thread argc_0 add:0xc83b28
+my_recv_thread argc_1 add:0xc83b2c
+my_recv_thread argc_0:1
+my_recv_thread argc_1:0
+my_recv_thread dev_idx:0
+my_recv_thread can_idx:0
+my_recv_thread begin while!
+启动通道2
+package_recv: buf[BEEF000001018003C0B3DEAD]
+ZCAN_StartCAN can_ind:1
+begin pthread_create pthread_1
+thread_parameters p:0xc83cd0
+my_recv_thread p_this:0x7fae4edbb010
+my_recv_thread p_this:0x7fae4edbb010
+my_recv_thread argc_0 add:0xc83cd8
+my_recv_thread argc_1 add:0xc83cdc
+my_recv_thread argc_0:0
+my_recv_thread argc_1:1
+my_recv_thread dev_idx:0
+my_recv_thread can_idx:1
+my_recv_thread begin while!
+数据接收线程已启动
+通道1发送数据
+Index:0000  CANFD1 TX ID:0x00000000 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0001  CANFD2 RX ID:0x00000000 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F3055C0
+Index:0002  CANFD2 TX ID:0x00000001 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0003  CANFD1 RX ID:0x00000001 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F37FDE8
+Index:0004  CANFD1 TX ID:0x00000002 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0005  CANFD2 RX ID:0x00000002 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F39880C
+Index:0006  CANFD2 TX ID:0x00000003 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0007  CANFD1 RX ID:0x00000003 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F41341C
+Index:0008  CANFD1 TX ID:0x00000004 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0009  CANFD2 RX ID:0x00000004 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F42BCB0
+Index:0010  CANFD2 TX ID:0x00000005 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0011  CANFD1 RX ID:0x00000005 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F4A60F0
+Index:0012  CANFD1 TX ID:0x00000006 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0013  CANFD2 RX ID:0x00000006 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F4BE9E8
+Index:0014  CANFD2 TX ID:0x00000007 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0015  CANFD1 RX ID:0x00000007 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F538FB8
+Index:0016  CANFD1 TX ID:0x00000008 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0017  CANFD2 RX ID:0x00000008 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F551A40
+Index:0018  CANFD2 TX ID:0x00000009 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+Index:0019  CANFD1 RX ID:0x00000009 Standard  Data   DLC:0x40 data:0x 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F TimeStamp:0x5F5CC970
+run thread exit
+my_recv_thread end return!
+package_recv: buf[BEEF0002010180090000C0C1DEAD]
+my_recv_thread end return!
+package_recv: buf[BEEF0002010180090000C0C1DEAD]
+package_recv: buf[BEEF00020101800A0000C0C3DEAD]
+close_usb_device index:0
+libusb_close return
+关闭设备 
+

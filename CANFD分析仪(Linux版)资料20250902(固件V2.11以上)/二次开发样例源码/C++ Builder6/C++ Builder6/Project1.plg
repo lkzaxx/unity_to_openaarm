@@ -1,0 +1,33 @@
+<html>
+<body>
+<pre>
+<h1>Build Log</h1>
+<h3>
+--------------------Configuration: Project1 - Win32 Debug--------------------
+</h3>
+<h3>Command Lines</h3>
+Creating temporary file "C:\Users\ttc52\AppData\Local\Temp\RSP780A.tmp" with contents
+[
+/nologo /MLd /W3 /Gm /GX /ZI /Od /D "WIN32" /D "_DEBUG" /D "_CONSOLE" /D "_MBCS" /Fp"Debug/Project1.pch" /YX /Fo"Debug/" /Fd"Debug/" /FD /GZ /c 
+"C:\Users\ttc52\Desktop\文件\产品资料\CAN分析仪二次开发示例源代码20240911\C++ Builder6_Example\Project1.cpp"
+]
+Creating command line "cl.exe @C:\Users\ttc52\AppData\Local\Temp\RSP780A.tmp" 
+Creating temporary file "C:\Users\ttc52\AppData\Local\Temp\RSP780B.tmp" with contents
+[
+kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /incremental:yes /pdb:"Debug/Project1.pdb" /debug /machine:I386 /out:"Debug/Project1.exe" /pdbtype:sept 
+".\Debug\Project1.obj"
+]
+Creating command line "link.exe @C:\Users\ttc52\AppData\Local\Temp\RSP780B.tmp"
+<h3>Output Window</h3>
+Compiling...
+Project1.cpp
+c:\users\ttc52\desktop\文件\产品资料\can分析仪二次开发示例源代码20240911\c++ builder6_example\project1.cpp(3) : fatal error C1083: Cannot open include file: 'vcl.h': No such file or directory
+执行 cl.exe 时出错.
+
+
+
+<h3>Results</h3>
+Project1.exe - 1 error(s), 0 warning(s)
+</pre>
+</body>
+</html>

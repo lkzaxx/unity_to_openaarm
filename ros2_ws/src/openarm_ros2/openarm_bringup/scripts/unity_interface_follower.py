@@ -90,8 +90,8 @@ ENABLE_DEXTEROUS_HAND = True  # 啟用靈巧手控制（需要 USB CANFD 設備�
 # 注意：左右靈巧手共用同一個 USB CANFD 設備，透過不同 CAN ID 區分
 DEXTEROUS_HAND_LEFT_CAN_ID = 0x12   # 左靈巧手 CAN ID
 DEXTEROUS_HAND_RIGHT_CAN_ID = 0x11  # 右靈巧手 CAN ID
-DEXTEROUS_HAND_SPEED = 200          # 速度 (0~255)
-DEXTEROUS_HAND_TORQUE = 200         # 力矩 (0~255)
+DEXTEROUS_HAND_SPEED = 230          # 速度 (0~255)
+DEXTEROUS_HAND_TORQUE = 230         # 力矩 (0~255)
 DEXTEROUS_HAND_CONTROL_FREQ = 30    # 控制頻率 (Hz) - 時間估算機制會自動防塞車
 
 # ============================================================================
@@ -229,6 +229,9 @@ class UnityFollowerInterface(Node):
         self.left_hand_target = [0.0] * 6  # 6 個手指 (0~1)
         self.right_hand_target = [0.0] * 6
         self.hand_target_lock = threading.Lock()
+        
+        # === 靈巧手卡住檢測（持續張開超時 → Disable + Open）===
+        self._hand_open_state = {}  # 記錄每隻手的張開狀態
         
         # 初始化 ZLGCAN（如果啟用靈巧手）
         if ENABLE_DEXTEROUS_HAND:
@@ -479,15 +482,17 @@ class UnityFollowerInterface(Node):
         """發送靈巧手回零命令"""
         if self.zlgcan is None:
             return
-        # 回零命令: 0xFD 0x04 + 30 bytes 0x00（手冊規範 reserved 填 0x00）
-        cmd = bytes([0xFD, 0x04] + [0x00] * 30)
+        # 回零命令: 0xFD 0x04 + 30 bytes 0xFF（特殊命令用 0xFF）
+        cmd = bytes([0xFD, 0x04] + [0xFF] * 30)
         self.zlgcan.transmit_fd(can_id, cmd)
     
     def _send_hand_positions(self, can_id: int, positions: list):
         """
-        發送靈巧手位置命令（帶時間估算防塞車機制）
+        發送靈巧手位置命令（帶時間估算防塞車機制 + 張開超時自動重置）
         
-        機制：根據位置變化量估算移動時間，在預計到達時間之前不發送新命令
+        機制：
+        1. 根據位置變化量估算移動時間，在預計到達時間之前不發送新命令
+        2. 偵測持續張開超過 2 秒 → 發送 Disable + Open 解除卡住
         
         Args:
             can_id: CAN ID (0x11=右手, 0x12=左手)
@@ -500,6 +505,62 @@ class UnityFollowerInterface(Node):
             return False
         
         current_time = time.time()
+        
+        # === 張開超時檢測參數 ===
+        OPEN_THRESHOLD = 0.3     # 5% 以下視為「張開」
+        CLOSE_THRESHOLD = 0.5    # 30% 以上視為「有動作」（用於判斷是否有操作過）
+        OPEN_TIMEOUT = 2.0        # 持續張開超過 2 秒觸發重置
+        OPEN_COOLDOWN = 5.0       # 重置後的冷卻時間
+        
+        # 初始化張開狀態
+        if can_id not in self._hand_open_state:
+            self._hand_open_state[can_id] = {
+                'open_start_time': None,
+                'last_reset_time': 0,
+                'had_activity': False  # 是否曾經有過非張開的動作
+            }
+        open_state = self._hand_open_state[can_id]
+        
+        # 判斷是否為「全張開」手勢
+        is_open_gesture = all(pos < OPEN_THRESHOLD for pos in positions)
+        # 判斷是否有「實際動作」（任一手指超過閾值）
+        has_activity = any(pos > CLOSE_THRESHOLD for pos in positions)
+        
+        # 記錄是否曾經有過動作
+        if has_activity:
+            open_state['had_activity'] = True
+        
+        if is_open_gesture:
+            # 只有在「曾經有過動作」後才開始計時
+            # 這樣純閒置的手不會觸發重置
+            if open_state['had_activity']:
+                if open_state['open_start_time'] is None:
+                    # 從有動作變成張開，開始計時
+                    open_state['open_start_time'] = current_time
+                
+                elif current_time - open_state['open_start_time'] > OPEN_TIMEOUT:
+                    # 持續張開超過 2 秒 → 可能卡住，執行 Disable + Open
+                    if current_time - open_state['last_reset_time'] > OPEN_COOLDOWN:
+                        hand_name = "左手" if can_id == DEXTEROUS_HAND_LEFT_CAN_ID else "右手"
+                        self.get_logger().warn(f"⚠️ [{hand_name}] 持續張開超過 {OPEN_TIMEOUT} 秒，執行 Disable + Open")
+                        
+                        # 發送 Disable (0x00)
+                        cmd_disable = bytes([0xFD, 0x00] + [0xFF] * 30)
+                        self.zlgcan.transmit_fd(can_id, cmd_disable)
+                        time.sleep(0.3)
+                        
+                        # 發送 Open (0x02)
+                        cmd_open = bytes([0xFD, 0x02] + [0xFF] * 30)
+                        self.zlgcan.transmit_fd(can_id, cmd_open)
+                        
+                        # 更新狀態：重置後清除活動標記，避免持續觸發
+                        open_state['open_start_time'] = None
+                        open_state['last_reset_time'] = current_time
+                        open_state['had_activity'] = False
+                        return True  # 已處理，跳過後續
+        else:
+            # 不是張開手勢，重置計時器
+            open_state['open_start_time'] = None
         
         # 初始化記錄
         if not hasattr(self, '_hand_state'):
@@ -968,7 +1029,7 @@ class UnityFollowerInterface(Node):
             try:
                 self.get_logger().info("Opening dexterous hands before shutdown...")
                 # 發送張開命令 (0xFD 0x02)
-                cmd_open = bytes([0xFD, 0x02] + [0x00] * 30)
+                cmd_open = bytes([0xFD, 0x02] + [0xFF] * 30)
                 self.zlgcan.transmit_fd(DEXTEROUS_HAND_LEFT_CAN_ID, cmd_open)
                 self.zlgcan.transmit_fd(DEXTEROUS_HAND_RIGHT_CAN_ID, cmd_open)
                 time.sleep(1.0)

@@ -1,0 +1,255 @@
+// Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// 中文(中华人民共和国) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_CHS)
+#ifdef _WIN32
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+#pragma code_page(936)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "#define _AFX_NO_SPLITTER_RESOURCES\r\n"
+    "#define _AFX_NO_OLE_RESOURCES\r\n"
+    "#define _AFX_NO_TRACKER_RESOURCES\r\n"
+    "#define _AFX_NO_PROPERTY_RESOURCES\r\n"
+    "\r\n"
+    "#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_CHS)\r\n"
+    "#ifdef _WIN32\r\n"
+    "LANGUAGE 4, 2\r\n"
+    "#pragma code_page(936)\r\n"
+    "#endif //_WIN32\r\n"
+    "#include ""res\\DemoCAN.rc2""  // non-Microsoft Visual C++ edited resources\r\n"
+    "#include ""l.chs\\afxres.rc""          // Standard components\r\n"
+    "#endif\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDR_MAINFRAME           ICON                    "res\\DemoCAN.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_ABOUTBOX DIALOG  0, 0, 235, 55
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "关于 DemoCAN"
+FONT 9, "宋体"
+BEGIN
+    ICON            IDR_MAINFRAME,IDC_STATIC,11,17,20,20
+    LTEXT           "DemoCAN 1.0 版",IDC_STATIC,40,10,119,8,SS_NOPREFIX
+    LTEXT           "版权所有 (C) 2007",IDC_STATIC,40,25,119,8
+    DEFPUSHBUTTON   "确定",IDOK,178,7,50,14,WS_GROUP
+END
+
+IDD_DEMOCAN_DIALOG DIALOGEX 0, 0, 453, 404
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "DemoFD"
+FONT 9, "宋体", 0, 0, 0x1
+BEGIN
+    GROUPBOX        "Transmit message",IDC_STATIC,7,22,439,50
+    LTEXT           "Frame:",IDC_STATIC,15,36,28,8
+    COMBOBOX        IDC_COMBO_SENDFRAMETYPE,42,34,45,63,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_COMBO_SENDFRAMEFORMAT,119,34,47,63,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "ID:",IDC_STATIC,181,36,13,8
+    EDITTEXT        IDC_EDIT_SEND_ID,196,34,54,14,ES_AUTOHSCROLL
+    LTEXT           "Data:",IDC_STATIC,16,57,21,8
+    EDITTEXT        IDC_EDIT_SEND_DATA,47,54,179,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "Send",IDC_BUTTON_SEND,267,53,50,14
+    GROUPBOX        "",IDC_STATIC,7,72,164,22
+    LTEXT           "ID Format:",IDC_STATIC,12,82,41,8
+    CONTROL         "SJA1000",IDC_RADIO_ID_FORMAT,"Button",BS_AUTORADIOBUTTON | WS_DISABLED | WS_GROUP,57,82,44,10
+    CONTROL         "Direct ID",IDC_RADIO_ID_FORMAT2,"Button",BS_AUTORADIOBUTTON,111,82,52,10
+    CONTROL         "CAN receive",IDC_CHECK_CANRX_EN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,384,77,59,10
+    PUSHBUTTON      "Clear",IDC_BUTTON_CLEAR,384,94,44,14
+    CONTROL         "List1",IDC_LIST1,"SysListView32",LVS_REPORT | WS_BORDER | WS_TABSTOP,7,114,439,262
+    LTEXT           "CAN Index:",IDC_STATIC,263,36,40,8
+    COMBOBOX        IDC_COMBO_CAN_INDEX,307,34,31,63,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Open device",IDC_BUTTON_OPEN_DEVICE,13,8,58,14
+    PUSHBUTTON      "Close device",IDC_BUTTON_CLOSE_DEVICE,75,8,57,14
+    LTEXT           "Type:",IDC_STATIC,96,36,21,8
+    LTEXT           "CAN/CANFD:",IDC_STATIC,345,36,40,8
+    COMBOBOX        IDC_COMBO_DEVTYPE,387,34,51,63,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_RECV_NUM,245,77,40,14,ES_AUTOHSCROLL
+    LTEXT           "CAN0_RX",IDC_STATIC,214,79,31,8
+    EDITTEXT        IDC_RECVFD_NUM,245,95,40,14,ES_AUTOHSCROLL
+    LTEXT           "CANFD0_RX",IDC_STATIC,206,97,37,8
+    LTEXT           "CAN1_RX",IDC_STATIC,301,80,29,8
+    LTEXT           "CANFD1_RX",IDC_STATIC,293,97,37,8
+    EDITTEXT        IDC_RECV_CAN1_NUM,332,77,40,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_RECV_CANFD1_NUM,332,95,40,14,ES_AUTOHSCROLL
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,1
+ PRODUCTVERSION 1,0,0,1
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x4L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "DemoCAN Microsoft 基础类应用程序"
+            VALUE "FileVersion", "1, 0, 0, 1"
+            VALUE "InternalName", "USBCAN_Demo"
+            VALUE "LegalCopyright", "版权所有 (C) 2012~2014 创芯光电科技有限公司"
+            VALUE "OriginalFilename", "USBCAN_Demo.exe"
+            VALUE "ProductName", "USBCAN_Demo应用程序"
+            VALUE "ProductVersion", "1, 0, 0, 1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO 
+BEGIN
+    IDD_ABOUTBOX, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 228
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 48
+    END
+
+    IDD_DEMOCAN_DIALOG, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 446
+        TOPMARGIN, 2
+        BOTTOMMARGIN, 397
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog Info
+//
+
+IDD_DEMOCAN_DIALOG DLGINIT
+BEGIN
+    IDC_COMBO_SENDFRAMETYPE, 0x403, 9, 0
+0x7453, 0x6e61, 0x6164, 0x6472, "\000" 
+    IDC_COMBO_SENDFRAMETYPE, 0x403, 9, 0
+0x7845, 0x6574, 0x646e, 0x6465, "\000" 
+    IDC_COMBO_SENDFRAMEFORMAT, 0x403, 6, 0
+0x6144, 0x6174, 0x0020, 
+    IDC_COMBO_SENDFRAMEFORMAT, 0x403, 7, 0
+0x6552, 0x6f6d, 0x6574, "\000" 
+    IDC_COMBO_CAN_INDEX, 0x403, 2, 0
+0x0030, 
+    IDC_COMBO_CAN_INDEX, 0x403, 2, 0
+0x0031, 
+    IDC_COMBO_DEVTYPE, 0x403, 4, 0
+0x4143, 0x004e, 
+    IDC_COMBO_DEVTYPE, 0x403, 6, 0
+0x4143, 0x464e, 0x0044, 
+    0
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE 
+BEGIN
+    IDS_ABOUTBOX            "关于 DemoCAN(&A)..."
+END
+
+#endif    // 中文(中华人民共和国) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+#define _AFX_NO_SPLITTER_RESOURCES
+#define _AFX_NO_OLE_RESOURCES
+#define _AFX_NO_TRACKER_RESOURCES
+#define _AFX_NO_PROPERTY_RESOURCES
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_CHS)
+#ifdef _WIN32
+LANGUAGE 4, 2
+#pragma code_page(936)
+#endif //_WIN32
+#include "res\DemoCAN.rc2"  // non-Microsoft Visual C++ edited resources
+#include "l.chs\afxres.rc"          // Standard components
+#endif
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

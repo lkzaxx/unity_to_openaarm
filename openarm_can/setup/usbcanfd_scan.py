@@ -506,7 +506,7 @@ def test_dexterous_hand(can_id: int = 0x12) -> None:
         
         # 構建 32 bytes 回零命令
         # Byte1=0xFD (全選寫入), Byte2=0x04 (回零)
-        cmd = bytes([0xFD, 0x04] + [0xFF] * 30)
+        cmd = bytes([0xFD, 0x04] + [0xFF] * 30)  # 特殊命令用 0xFF
         
         print(f"\n[發送] 靈巧手回零命令 -> ID=0x{can_id:02X}")
         print(f"  DATA: {' '.join(f'{b:02X}' for b in cmd[:16])} ...")
@@ -574,15 +574,16 @@ def demo_gestures(can_id: int = 0x12) -> None:
     def build_cmd(mode: int, motor_positions: list = None, speed: int = 200, torque: int = 200) -> bytes:
         """構建 32 bytes 命令"""
         if motor_positions is None:
+            # 特殊命令（0x02=張開, 0x03=握拳, 0x04=回零）用 0xFF 填充
             return bytes([0xFD, mode] + [0xFF] * 30)
         else:
-            # 構建位置控制命令
-            data = [0xFD, 0x01]  # 全選 + 位置模式
+            # 位置模式（0x01）：Reserved 填 0x00
+            data = [0xFD, 0x01]
             for pos in motor_positions:
                 # 每個馬達: Position(1), Speed(1), Torque(1), Reserved(2)
-                data.extend([pos, speed, torque, 0xFF, 0xFF])
+                data.extend([pos, speed, torque, 0x00, 0x00])  # Reserved 填 0x00
             while len(data) < 32:
-                data.append(0xFF)
+                data.append(0x00)
             return bytes(data[:32])
     
     # 預定義命令
@@ -661,18 +662,21 @@ def interactive_menu(can_id: int = 0x12) -> None:
     
     def build_cmd(mode: int, motor_positions: list = None, speed: int = 200, torque: int = 200) -> bytes:
         if motor_positions is None:
+            # 特殊命令（0x02=張開, 0x03=握拳, 0x04=回零）用 0xFF 填充
             return bytes([0xFD, mode] + [0xFF] * 30)
         else:
+            # 位置模式（0x01）：Reserved 填 0x00
             data = [0xFD, 0x01]
             for pos in motor_positions:
-                data.extend([pos, speed, torque, 0xFF, 0xFF])
+                data.extend([pos, speed, torque, 0x00, 0x00])  # Reserved 填 0x00
             while len(data) < 32:
-                data.append(0xFF)
+                data.append(0x00)
             return bytes(data[:32])
     
     # M1=拇指旋轉, M2=拇指伸縮, M3=食指, M4=中指, M5=無名指, M6=尾指
     # 0=伸直, 255=彎曲
     GESTURES = {
+        "disable": (build_cmd(0x00), "禁用 ⛔"),  # 釋放電機
         "home": (build_cmd(0x04), "回零"),
         "open": (build_cmd(0x02), "張開 ✋"),
         "close": (build_cmd(0x03), "握緊 ✊"),
@@ -698,7 +702,7 @@ def interactive_menu(can_id: int = 0x12) -> None:
         
         # 連線測試：發送回零命令（跳過讀取檢查，因為 USB CANFD 接收功能可能不正常）
         print(f"\n[初始化] 發送回零命令到 {hand_name} (ID=0x{can_id:02X})...")
-        CMD_HOME = bytes([0xFD, 0x04] + [0xFF] * 30)
+        CMD_HOME = bytes([0xFD, 0x04] + [0xFF] * 30)  # 特殊命令用 0xFF
         can.transmit_fd(can_id, CMD_HOME)
         time.sleep(2)
         print(f"[初始化] 完成！如果手沒有回零，請檢查電源和接線。")
@@ -723,12 +727,13 @@ def interactive_menu(can_id: int = 0x12) -> None:
             print(f"   USBCANFD 靈巧手控制器 ({hand_name} ID=0x{can_id:02X})")
             print("=" * 55)
             print()
-            print("  1. 回零    2. 張開 ✋   3. 握緊 ✊")
+            print("  0. 禁用 ⛔  1. 回零    2. 張開 ✋   3. 握緊 ✊")
             print()
             print("  4. 讚 👍   5. 比YA ✌️   6. OK 👌")
             print("  7. 指 👆   8. 搖滾 🤘")
             print()
-            print("  d. 自動演示   m. 選單   q. 離開")
+            print("  r. 重置(禁用+回零)  f. 單指連續  t. 拇指測試")
+            print("  d. 自動演示         m. 選單      q. 離開")
             print("-" * 55)
             if last_action:
                 print(f"  上次: {last_action}")
@@ -751,6 +756,87 @@ def interactive_menu(can_id: int = 0x12) -> None:
             time.sleep(1)
             return "自動演示完成"
         
+        def run_finger_sequence():
+            """單指連續動作：從握拳開始，依序伸出每個手指"""
+            clear_screen()
+            print("[單指連續] 開始...\n")
+            print("  M1=拇指旋轉, M2=拇指伸縮, M3=食指, M4=中指, M5=無名指, M6=尾指")
+            print("  0=伸直, 255=彎曲\n")
+            
+            # 單指序列：從握拳開始，依序把每個手指伸出（其他握拳）
+            # 大拇指需要 M1(旋轉) 和 M2(伸縮) 都設為 0 才完全伸出
+            finger_sequence = [
+                ([255, 255, 255, 255, 255, 255], "0. 握拳 ✊"),
+                ([0,   0,   255, 255, 255, 255], "1. 大拇指 👍"),
+                ([255, 255, 0,   255, 255, 255], "2. 食指 ☝️"),
+                ([255, 255, 255, 0,   255, 255], "3. 中指 🖕"),
+                ([255, 255, 255, 255, 0,   255], "4. 無名指 💍"),
+                ([255, 255, 255, 255, 255, 0  ], "5. 小指 🤙"),
+                ([255, 255, 255, 255, 255, 255], "6. 握拳 ✊"),
+                ([0,   0,   0,   0,   0,   0  ], "7. 張開 ✋"),
+            ]
+            
+            for i, (positions, name) in enumerate(finger_sequence):
+                cmd = build_cmd(0x01, positions, speed=200, torque=200)
+                print(f"  {name}")
+                print(f"    位置: {positions}")
+                success = can.transmit_fd(can_id, cmd)
+                if not success:
+                    print("    [!] 發送失敗")
+                    break
+                time.sleep(1.5)  # 等待動作完成
+            
+            print("\n[單指連續] 完成!")
+            time.sleep(1)
+            return "單指連續完成"
+        
+        def run_thumb_test():
+            """拇指獨立測試：分別測試 M1(旋轉) 和 M2(伸縮)，其他手指張開"""
+            clear_screen()
+            print("[拇指測試] 開始...\n")
+            print("  M1=拇指旋轉 (0=不旋轉, 255=旋轉)")
+            print("  M2=拇指伸縮 (0=伸直, 255=彎曲)")
+            print("  其他手指保持張開 (0)\n")
+            
+            # 拇指測試序列：其他手指都是 0（張開）
+            thumb_sequence = [
+                # [M1, M2, M3, M4, M5, M6]
+                ([0,   0,   0, 0, 0, 0], "0. 全部張開 ✋"),
+                
+                # M1 旋轉測試
+                ([64,  0,   0, 0, 0, 0], "1. M1=64  (旋轉 25%)"),
+                ([128, 0,   0, 0, 0, 0], "2. M1=128 (旋轉 50%)"),
+                ([192, 0,   0, 0, 0, 0], "3. M1=192 (旋轉 75%)"),
+                ([255, 0,   0, 0, 0, 0], "4. M1=255 (旋轉 100%)"),
+                ([0,   0,   0, 0, 0, 0], "5. M1=0   (復位)"),
+                
+                # M2 伸縮測試
+                ([0,   64,  0, 0, 0, 0], "6. M2=64  (彎曲 25%)"),
+                ([0,   128, 0, 0, 0, 0], "7. M2=128 (彎曲 50%)"),
+                ([0,   192, 0, 0, 0, 0], "8. M2=192 (彎曲 75%)"),
+                ([0,   255, 0, 0, 0, 0], "9. M2=255 (彎曲 100%)"),
+                ([0,   0,   0, 0, 0, 0], "10. M2=0  (復位)"),
+                
+                # M1 + M2 組合
+                ([128, 128, 0, 0, 0, 0], "11. M1=128, M2=128 (旋轉+彎曲 50%)"),
+                ([255, 255, 0, 0, 0, 0], "12. M1=255, M2=255 (旋轉+彎曲 100%)"),
+                ([0,   0,   0, 0, 0, 0], "13. 全部張開 ✋"),
+            ]
+            
+            for i, (positions, name) in enumerate(thumb_sequence):
+                cmd = build_cmd(0x01, positions, speed=200, torque=200)
+                print(f"  {name}")
+                print(f"    位置: {positions}")
+                success = can.transmit_fd(can_id, cmd)
+                if not success:
+                    print("    [!] 發送失敗")
+                    break
+                time.sleep(1.5)  # 等待動作完成
+            
+            print("\n[拇指測試] 完成!")
+            time.sleep(1)
+            return "拇指測試完成"
+        
         last_action = ""
         show_menu()
         
@@ -762,6 +848,18 @@ def interactive_menu(can_id: int = 0x12) -> None:
                     clear_screen()
                     print("再見！")
                     break
+                elif choice == "0":
+                    _, last_action = send_gesture("disable", 0.5)
+                    print("  [提示] 電機已禁用，可手動撥開卡住的手指")
+                    show_menu(last_action)
+                elif choice in ["r", "reset"]:
+                    # 重置序列：先禁用再回零
+                    print("  [重置] 步驟 1/2: 禁用電機...")
+                    send_gesture("disable", 1.0)
+                    print("  [重置] 步驟 2/2: 執行回零...")
+                    _, last_action = send_gesture("home", 2.0)
+                    last_action = "重置完成 (禁用+回零)"
+                    show_menu(last_action)
                 elif choice == "1":
                     _, last_action = send_gesture("home", 0.5)
                     show_menu(last_action)
@@ -788,6 +886,12 @@ def interactive_menu(can_id: int = 0x12) -> None:
                     show_menu(last_action)
                 elif choice in ["d", "demo"]:
                     last_action = run_demo()
+                    show_menu(last_action)
+                elif choice in ["f", "finger"]:
+                    last_action = run_finger_sequence()
+                    show_menu(last_action)
+                elif choice in ["t", "thumb"]:
+                    last_action = run_thumb_test()
                     show_menu(last_action)
                 elif choice in ["m", "menu"]:
                     show_menu(last_action)

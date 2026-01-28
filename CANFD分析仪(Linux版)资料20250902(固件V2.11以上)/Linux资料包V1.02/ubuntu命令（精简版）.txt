@@ -1,0 +1,59 @@
+
+//以下命令是查看USB设备信息，插上USB即可查找到ID 04d8:0053 Microchip Technology, Inc. 设备，无需安装USB驱动。USB驱动已集成在二次开发库中。
+ttc@ubuntu:~$ lsusb
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 002 Device 004: ID 04d8:0053 Microchip Technology, Inc. 
+Bus 002 Device 003: ID 0e0f:0002 VMware, Inc. Virtual USB Hub
+Bus 002 Device 002: ID 0e0f:0003 VMware, Inc. Virtual Mouse
+Bus 002 Device 001: ID 1d6b:0001 Linux Foundation 1.1 root hub
+ttc@ubuntu:~$ 
+//以上命令是查看USB设备信息，插上USB即可查找到ID 04d8:0053 Microchip Technology, Inc. 设备，无需安装USB驱动。USB驱动已集成在二次开发库中。
+
+//将controlcanfd文件夹放在桌面。把CAN1与CAN2对接，运行后，可以看到程序内置的发送数据，被另一个通道接收。
+
+
+ttc@ubuntu:~$ cd Desktop/controlcanfd/
+ttc@ubuntu:~/Desktop/controlcan$ rm hello_cpp
+ttc@ubuntu:~/Desktop/controlcan$ make clean && make
+ttc@ubuntu:~/Desktop/controlcan$ sudo ./hello_cpp
+
+运行结果
+[sudo] password for ttc: 
+Hello, this is canfd test demo!
+load_so_dll current_path:/home/ttc/Desktop/controlcanfd
+load_so_dll dll_path:/home/ttc/Desktop/controlcanfd/libcontrolcanfd.so
+ZCAN_OpenDevice Enter
+open_usb_device ret:0
+打开设备成功！
+zcan_get_device_inf return:1
+设备信息:
+hw_Version:200
+fw_Version:212
+dr_Version:121
+in_Version:103
+irq_Num:0
+can_Num:2
+str_Serial_Num:USBCANFD212203000001
+str_hw_Type:USBCANFD
+初始化通道1
+清除通道1滤波设置
+清除通道2滤波设置
+生效通道1滤波设置
+生效通道2滤波设置
+启动通道1
+ZCAN_StartCAN can_ind:0
+begin pthread_create pthread_0
+my_recv_thread dev_idx:0
+my_recv_thread can_idx:0
+my_recv_thread begin while!
+启动通道2
+ZCAN_StartCAN can_ind:1
+begin pthread_create pthread_1
+my_recv_thread dev_idx:0
+my_recv_thread can_idx:1
+my_recv_thread begin while!
+数据接收线程已启动
+通道1发送数据
+Index:0000  CANFD1 TX
+
+--------------省略---------------
