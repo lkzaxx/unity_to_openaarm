@@ -21,6 +21,7 @@
 .cursor-server/
 .antigravity-server/
 .gemini/
+.sunlogin/
 
 # ROS2 編譯產物
 ros2_ws/build/
