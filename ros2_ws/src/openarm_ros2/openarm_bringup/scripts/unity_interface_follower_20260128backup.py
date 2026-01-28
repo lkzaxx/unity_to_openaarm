@@ -19,9 +19,6 @@ import threading
 import time
 import os
 
-# 靈巧手控制器（方案 A：模組化）
-from dexterous_hand_controller import DexterousHandController
-
 # Ruckig 軌跡平滑（條件 import）
 try:
     from ruckig import Ruckig, InputParameter, OutputParameter, Result
@@ -226,13 +223,15 @@ class UnityFollowerInterface(Node):
         self.right_arm.init_arm_motors(MOTOR_TYPES, SEND_IDS, RECV_IDS)
         self.right_arm.init_gripper_motor(GRIPPER_MOTOR_TYPE, GRIPPER_SEND_ID, GRIPPER_RECV_ID)
         
-        # === 初始化靈巧手（使用 DexterousHandController 模組）===
+        # === 初始化靈巧手（使用 USB CANFD via ZLGCAN SDK）===
         self.zlgcan = None  # 共用的 ZLGCAN 設備
-        self.left_hand = None  # 左手控制器
-        self.right_hand = None  # 右手控制器
+        self.dexterous_hand_ready = False  # 靈巧手是否可用
         self.left_hand_target = [0.0] * 6  # 6 個手指 (0~1)
         self.right_hand_target = [0.0] * 6
         self.hand_target_lock = threading.Lock()
+        
+        # === 靈巧手卡住檢測（持續張開超時 → Disable + Open）===
+        self._hand_open_state = {}  # 記錄每隻手的張開狀態
         
         # 初始化 ZLGCAN（如果啟用靈巧手）
         if ENABLE_DEXTEROUS_HAND:
@@ -248,28 +247,14 @@ class UnityFollowerInterface(Node):
                     self.zlgcan.set_baudrate(0, 1000000, 5000000)  # 1Mbps/5Mbps
                     self.zlgcan.init_channel(0, MODE_NORMAL)
                     self.zlgcan.start_can()
-                    
-                    # 創建左右手控制器
-                    self.left_hand = DexterousHandController(
-                        zlgcan=self.zlgcan,
-                        can_id=DEXTEROUS_HAND_LEFT_CAN_ID,
-                        speed=DEXTEROUS_HAND_SPEED,
-                        torque=DEXTEROUS_HAND_TORQUE
-                    )
-                    self.right_hand = DexterousHandController(
-                        zlgcan=self.zlgcan,
-                        can_id=DEXTEROUS_HAND_RIGHT_CAN_ID,
-                        speed=DEXTEROUS_HAND_SPEED,
-                        torque=DEXTEROUS_HAND_TORQUE
-                    )
-                    
+                    self.dexterous_hand_ready = True
                     self.get_logger().info("✅ USB CANFD initialized!")
-                    self.get_logger().info(f"   {self.left_hand}")
-                    self.get_logger().info(f"   {self.right_hand}")
+                    self.get_logger().info(f"   Left Hand CAN ID: 0x{DEXTEROUS_HAND_LEFT_CAN_ID:02X}")
+                    self.get_logger().info(f"   Right Hand CAN ID: 0x{DEXTEROUS_HAND_RIGHT_CAN_ID:02X}")
                     
                     # 發送回零命令
-                    self.left_hand.send_home()
-                    self.right_hand.send_home()
+                    self._send_hand_home(DEXTEROUS_HAND_LEFT_CAN_ID)
+                    self._send_hand_home(DEXTEROUS_HAND_RIGHT_CAN_ID)
                     time.sleep(2.0)  # 等待回零完成
                 else:
                     self.get_logger().warn("⚠️ USB CANFD device not found (靈巧手功能停用)")
@@ -281,8 +266,7 @@ class UnityFollowerInterface(Node):
         # 顯示末端執行器狀態
         self.get_logger().info(f"End effector mode: COEXISTENCE")
         self.get_logger().info(f"   Gripper: {'✅ Enabled' if ENABLE_GRIPPER else '❌ Disabled'}")
-        ehand_ready = (self.left_hand is not None and self.left_hand.is_ready()) or (self.right_hand is not None and self.right_hand.is_ready())
-        self.get_logger().info(f"   Dexterous Hand: {'✅ Ready' if ehand_ready else '⚠️ Not available'}")
+        self.get_logger().info(f"   Dexterous Hand: {'✅ Ready' if self.dexterous_hand_ready else '⚠️ Not available'}")
         
         # === 啟用馬達 ===
         self.get_logger().info("Enabling all motors...")
@@ -494,6 +478,170 @@ class UnityFollowerInterface(Node):
             r_str = str([round(x, 2) for x in self.right_hand_target])
             self.get_logger().info(f"[ehand] L={l_str}, R={r_str}")
     
+    def _send_hand_home(self, can_id: int):
+        """發送靈巧手回零命令"""
+        if self.zlgcan is None:
+            return
+        # 回零命令: 0xFD 0x04 + 30 bytes 0xFF（特殊命令用 0xFF）
+        cmd = bytes([0xFD, 0x04] + [0xFF] * 30)
+        self.zlgcan.transmit_fd(can_id, cmd)
+    
+    def _send_hand_positions(self, can_id: int, positions: list):
+        """
+        發送靈巧手位置命令（帶時間估算防塞車機制 + 張開超時自動重置）
+        
+        機制：
+        1. 根據位置變化量估算移動時間，在預計到達時間之前不發送新命令
+        2. 偵測持續張開超過 2 秒 → 發送 Disable + Open 解除卡住
+        
+        Args:
+            can_id: CAN ID (0x11=右手, 0x12=左手)
+            positions: 6 個手指位置 (0~1)
+        
+        Returns:
+            True 如果發送，False 如果跳過
+        """
+        if self.zlgcan is None:
+            return False
+        
+        current_time = time.time()
+        
+        # === 張開超時檢測參數 ===
+        OPEN_THRESHOLD = 0.3     # 5% 以下視為「張開」
+        CLOSE_THRESHOLD = 0.5    # 30% 以上視為「有動作」（用於判斷是否有操作過）
+        OPEN_TIMEOUT = 2.0        # 持續張開超過 2 秒觸發重置
+        OPEN_COOLDOWN = 5.0       # 重置後的冷卻時間
+        
+        # 初始化張開狀態
+        if can_id not in self._hand_open_state:
+            self._hand_open_state[can_id] = {
+                'open_start_time': None,
+                'last_reset_time': 0,
+                'had_activity': False  # 是否曾經有過非張開的動作
+            }
+        open_state = self._hand_open_state[can_id]
+        
+        # 判斷是否為「全張開」手勢
+        is_open_gesture = all(pos < OPEN_THRESHOLD for pos in positions)
+        # 判斷是否有「實際動作」（任一手指超過閾值）
+        has_activity = any(pos > CLOSE_THRESHOLD for pos in positions)
+        
+        # 記錄是否曾經有過動作
+        if has_activity:
+            open_state['had_activity'] = True
+        
+        if is_open_gesture:
+            # 只有在「曾經有過動作」後才開始計時
+            # 這樣純閒置的手不會觸發重置
+            if open_state['had_activity']:
+                if open_state['open_start_time'] is None:
+                    # 從有動作變成張開，開始計時
+                    open_state['open_start_time'] = current_time
+                
+                elif current_time - open_state['open_start_time'] > OPEN_TIMEOUT:
+                    # 持續張開超過 2 秒 → 可能卡住，執行 Disable + Open
+                    if current_time - open_state['last_reset_time'] > OPEN_COOLDOWN:
+                        hand_name = "左手" if can_id == DEXTEROUS_HAND_LEFT_CAN_ID else "右手"
+                        self.get_logger().warn(f"⚠️ [{hand_name}] 持續張開超過 {OPEN_TIMEOUT} 秒，執行 Disable + Open")
+                        
+                        # 發送 Disable (0x00)
+                        cmd_disable = bytes([0xFD, 0x00] + [0xFF] * 30)
+                        self.zlgcan.transmit_fd(can_id, cmd_disable)
+                        time.sleep(0.3)
+                        
+                        # 發送 Open (0x02)
+                        cmd_open = bytes([0xFD, 0x02] + [0xFF] * 30)
+                        self.zlgcan.transmit_fd(can_id, cmd_open)
+                        
+                        # 更新狀態：重置後清除活動標記，避免持續觸發
+                        open_state['open_start_time'] = None
+                        open_state['last_reset_time'] = current_time
+                        open_state['had_activity'] = False
+                        return True  # 已處理，跳過後續
+        else:
+            # 不是張開手勢，重置計時器
+            open_state['open_start_time'] = None
+        
+        # 初始化記錄
+        if not hasattr(self, '_hand_state'):
+            self._hand_state = {}
+        
+        if can_id not in self._hand_state:
+            self._hand_state[can_id] = {
+                'last_pos': None,
+                'target_pos': None,
+                'estimated_arrival': 0  # 預計到達時間
+            }
+        
+        state = self._hand_state[can_id]
+        
+        # 計算位置值
+        pos_values = []
+        for i in range(6):
+            pos_value = int(positions[i] * 255)  # 0~1 -> 0~255
+            pos_value = max(0, min(255, pos_value))
+            pos_values.append(pos_value)
+        
+        # 發送策略 A：動態等待時間
+        # 根據上次發送的移動距離估算所需時間，等待完成後才發送下一個命令
+        MAX_TRAVEL_TIME = 1.5  # 全程（0→255）移動時間（秒）
+        MIN_INTERVAL = 0.1    # 最小發送間隔（秒）
+        CHANGE_THRESHOLD = 5  # 變化閾值（小於此值視為沒變化）
+        
+        if state['target_pos'] is not None:
+            time_since_last = current_time - state.get('last_send_time', 0)
+            
+            # 計算新目標和「已發送目標」的差異
+            target_change = max(abs(pos_values[i] - state['target_pos'][i]) for i in range(6))
+            
+            # 如果目標沒變（或變化很小），不重複發送
+            if target_change < CHANGE_THRESHOLD:
+                return False
+            
+            # 計算上次動作預估需要的時間
+            if state['last_pos'] is not None:
+                last_move = max(abs(state['target_pos'][i] - state['last_pos'][i]) for i in range(6))
+                estimated_time = (last_move / 255.0) * MAX_TRAVEL_TIME + MIN_INTERVAL
+            else:
+                estimated_time = MIN_INTERVAL
+            
+            # 等待上次動作完成
+            if time_since_last < estimated_time:
+                return False
+        
+        # 更新狀態
+        state['last_pos'] = state['target_pos']
+        state['target_pos'] = pos_values[:]
+        state['last_send_time'] = current_time
+        
+        # 32 bytes 封包格式:
+        # [0xFD][0x01][M1: Pos,Speed,Torque,0,0][M2: ...][M3: ...][M4: ...][M5: ...][M6: ...]
+        data = [0xFD, 0x01]  # 全選寫入 + 位置模式
+        
+        for pos_value in pos_values:
+            # 每個馬達 5 bytes: Position, Speed, Torque, Reserved, Reserved
+            # 手冊規範 reserved 填 0x00
+            data.extend([pos_value, DEXTEROUS_HAND_SPEED, DEXTEROUS_HAND_TORQUE, 0x00, 0x00])
+        
+        result = self.zlgcan.transmit_fd(can_id, bytes(data))
+        
+        # Debug: 左右手分開計數，每 10 次輸出詳細資訊
+        if can_id == DEXTEROUS_HAND_LEFT_CAN_ID:
+            if not hasattr(self, '_send_left_count'):
+                self._send_left_count = 0
+            self._send_left_count += 1
+            if self._send_left_count % 10 == 0:
+                # 顯示完整封包內容
+                data_hex = ' '.join(f'{b:02X}' for b in data[:16])
+                self.get_logger().info(f"[LEFT_HAND] len={len(data)}, data={data_hex}..., result={result}")
+        else:
+            if not hasattr(self, '_send_right_count'):
+                self._send_right_count = 0
+            self._send_right_count += 1
+            if self._send_right_count % 10 == 0:
+                data_hex = ' '.join(f'{b:02X}' for b in data[:16])
+                self.get_logger().info(f"[RIGHT_HAND] len={len(data)}, data={data_hex}..., result={result}")
+    
     def _clamp_position(self, pos: float, joint_idx: int, limits: dict) -> float:
         """限制位置在安全範圍內"""
         if joint_idx in limits:
@@ -685,12 +833,12 @@ class UnityFollowerInterface(Node):
                 if ENABLE_GRIPPER:
                     self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
                 
-                # 靈巧手：使用 DexterousHandController
-                if self.left_hand and self.left_hand.is_ready() and loop_count % hand_control_interval == 0:
+                # 靈巧手：根據是否可用和是否有命令來控制
+                if self.dexterous_hand_ready and loop_count % hand_control_interval == 0:
                     with self.hand_target_lock:
                         left_fingers = self.left_hand_target[:]
-                    # 發送位置命令（防塞車機制已內建）
-                    self.left_hand.send_positions(left_fingers)
+                    # 左手：總是發送（移除判斷條件以便測試）
+                    self._send_hand_positions(DEXTEROUS_HAND_LEFT_CAN_ID, left_fingers)
                 
                 self.left_arm.recv_all(500)
                 
@@ -703,12 +851,12 @@ class UnityFollowerInterface(Node):
                     right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
                     self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
                 
-                # 靈巧手：使用 DexterousHandController
-                if self.right_hand and self.right_hand.is_ready() and loop_count % hand_control_interval == 0:
+                # 靈巧手：根據是否可用和是否有命令來控制
+                if self.dexterous_hand_ready and loop_count % hand_control_interval == 0:
                     with self.hand_target_lock:
                         right_fingers = self.right_hand_target[:]
-                    # 發送位置命令（防塞車機制已內建）
-                    self.right_hand.send_positions(right_fingers)
+                    # 右手：總是發送（時間估算機制會自動防塞車）
+                    self._send_hand_positions(DEXTEROUS_HAND_RIGHT_CAN_ID, right_fingers)
                 
                 self.right_arm.recv_all(500)
                 
