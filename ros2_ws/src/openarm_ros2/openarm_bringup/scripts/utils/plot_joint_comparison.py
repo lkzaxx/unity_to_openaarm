@@ -12,8 +12,6 @@ Joint Position Comparison Plotter
     python3 plot_joint_comparison.py joint_data_20260120_143000.pkl --arm both
 """
 
-import matplotlib.pyplot as plt
-import matplotlib
 import pickle
 import os
 import sys
@@ -21,15 +19,34 @@ import argparse
 from datetime import datetime
 from typing import Optional
 
-# 使用非 GUI backend（適用於無顯示器環境）
-matplotlib.use('Agg')
+# 嘗試導入 matplotlib（可能在某些環境中不可用）
+try:
+    import matplotlib
+    # 使用非 GUI backend（適用於無顯示器環境）
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError as e:
+    MATPLOTLIB_AVAILABLE = False
+    _matplotlib_error = str(e)
 
 # 設定中文字體（如果可用）
-try:
-    plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica']
-    plt.rcParams['axes.unicode_minus'] = False
-except:
-    pass
+if MATPLOTLIB_AVAILABLE:
+    try:
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica']
+        plt.rcParams['axes.unicode_minus'] = False
+    except:
+        pass
+
+
+def _check_matplotlib():
+    """檢查 matplotlib 是否可用，不可用則拋出有意義的錯誤"""
+    if not MATPLOTLIB_AVAILABLE:
+        # 提供診斷信息
+        diag_info = f"matplotlib import error: {_matplotlib_error}\n"
+        diag_info += f"Python: {sys.executable}\n"
+        diag_info += f"sys.path: {sys.path[:3]}..."
+        raise ImportError(f"matplotlib 不可用。請執行: pip3 install matplotlib\n診斷: {diag_info}")
 
 
 def plot_joint_comparison(
@@ -50,6 +67,8 @@ def plot_joint_comparison(
     Returns:
         list: 產生的圖檔路徑列表
     """
+    _check_matplotlib()
+    
     # 載入數據
     with open(data_file, 'rb') as f:
         data = pickle.load(f)
@@ -146,6 +165,8 @@ def plot_all_joints_combined(
     Returns:
         str: 產生的圖檔路徑
     """
+    _check_matplotlib()
+    
     with open(data_file, 'rb') as f:
         data = pickle.load(f)
     

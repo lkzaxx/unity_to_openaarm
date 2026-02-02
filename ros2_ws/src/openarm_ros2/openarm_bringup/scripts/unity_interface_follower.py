@@ -865,10 +865,14 @@ class UnityFollowerInterface(Node):
                     # 自動繪圖
                     if AUTO_PLOT_ON_SHUTDOWN:
                         try:
-                            from utils.plot_joint_comparison import plot_joint_comparison
+                            from utils.plot_joint_comparison import plot_joint_comparison, plot_all_joints_combined
                             self.get_logger().info("🎨 正在繪製比較圖...")
                             output_files = plot_joint_comparison(data_file, arm='both')
-                            self.get_logger().info(f"✅ 已產生 {len(output_files)} 張圖")
+                            # 繪製組合圖（所有關節在同一張圖）
+                            left_combined = plot_all_joints_combined(data_file, arm='left')
+                            right_combined = plot_all_joints_combined(data_file, arm='right')
+                            output_files.extend([left_combined, right_combined])
+                            self.get_logger().info(f"✅ 已產生 {len(output_files)} 張圖（含組合圖）")
                         except Exception as e:
                             self.get_logger().warn(f"⚠️ 繪圖失敗: {e}")
                 else:
