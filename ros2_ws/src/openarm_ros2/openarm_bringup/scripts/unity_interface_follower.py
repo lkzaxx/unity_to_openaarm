@@ -104,9 +104,39 @@ DEXTEROUS_HAND_CONTROL_FREQ = 30    # 控制頻率 (Hz) - 時間估算機制會�
 # Kp, Kd 參數（沿用 ros2_control 配置）
 # KP = [70.0, 70.0, 20.0, 20.0,  5.0,  5.0,  5.0]
 # KP = [20.0, 20.0, 10.0, 10.0, 5.0, 5.0, 5.0]
-KP = [30.0, 30.0, 20.0,20.0, 5.0, 5.0, 5.0]
-# [2026-01-30] J1-2 增加阻尼抑制靜態震盪：2.75→3.5, 2.5→3.5
-KD = [3.5, 3.5, 0.7, 0.4, 0.7, 0.6, 0.5]
+# KP = [30.0, 30.0, 20.0,20.0, 5.0, 5.0, 5.0]
+# KD = [3.5, 3.5, 0.7, 0.4, 0.7, 0.6, 0.5]
+# [2026-02-05] 提高 Kp 替代重力補償，同時提高 Kd 保持阻尼比
+# KP = [60.0, 60.0, 40.0, 40.0, 30.0, 30.0, 30.0]
+# KD = [4.0, 4.0, 1.2, 1.0, 1.0, 1.0, 1.0]
+# [2026-02-09] 針對 J1, J2, J4, J7 再提高 Kp（這些關節需抵抗重力）
+# KP = [80.0, 80.0, 40.0, 60.0, 30.0, 30.0, 50.0]
+# KD = [4.5, 4.5, 1.2, 1.5, 1.0, 1.0, 1.2]
+# [2026-02-09] J1 再提高 Kp 改善追蹤
+# KP = [100.0, 80.0, 40.0, 60.0, 30.0, 30.0, 50.0]
+# KD = [5.0, 4.5, 1.2, 1.5, 1.0, 1.0, 1.2]
+
+# [2026-02-10] 動態 Kp/Kd 方案（根據誤差大小調整）
+USE_DYNAMIC_KP_KD = True  # 開啟動態 Kp/Kd
+
+# [2026-02-11] 只對指定關節使用動態 Kp/Kd（其他關節出現震盪）
+DYNAMIC_KP_KD_JOINTS = [0, 1]  # 只對 J1, J2 使用動態調整
+
+# 基礎 Kp/Kd（動態調整的基準值）
+BASE_KP = [100.0, 80.0, 40.0, 60.0, 30.0, 30.0, 50.0]
+BASE_KD = [5.0, 4.5, 1.2, 1.5, 1.0, 1.0, 1.2]
+
+# 動態調整參數
+LARGE_ERROR_THRESHOLD = 0.2   # 大誤差閾值 (rad)
+SMALL_ERROR_THRESHOLD = 0.05  # 小誤差閾值 (rad)
+LARGE_ERROR_KP_SCALE = 1.5    # 大誤差時 Kp 放大倍數
+LARGE_ERROR_KD_SCALE = 0.8    # 大誤差時 Kd 縮小倍數
+SMALL_ERROR_KP_SCALE = 0.7    # 小誤差時 Kp 縮小倍數
+SMALL_ERROR_KD_SCALE = 1.2    # 小誤差時 Kd 放大倍數
+
+# 靜態 Kp/Kd（USE_DYNAMIC_KP_KD = False 時使用）
+KP = BASE_KP[:]
+KD = BASE_KD[:]
 
 # 夾爪參數
 GRIPPER_KP = 5.0
@@ -142,7 +172,8 @@ USE_DEADLINE_TIMING = False
 # E. Ruckig 軌跡平滑：使用 Ruckig 產生 jerk-limited 軌跡
 #    True = 使用 Ruckig 平滑 + 速度前饋（推薦）
 #    False = 使用原始 rate limiting
-USE_RUCKIG_SMOOTHING = True
+# [2026-02-05] 測試關閉 Ruckig，直接追蹤 Unity 目標
+USE_RUCKIG_SMOOTHING = False
 
 # Ruckig 參數（只在 USE_RUCKIG_SMOOTHING = True 時使用）
 # [2026-01-30] A+ 方案：根據馬達實際能力調整（約 30~50% 馬達能力）
@@ -504,6 +535,47 @@ class UnityFollowerInterface(Node):
             return max(lower, min(pos, upper))
         return pos
     
+    def _get_dynamic_kp_kd(self, joint_idx: int, position_error: float) -> tuple:
+        """
+        根據誤差大小動態調整 Kp/Kd
+        
+        策略：
+        - 大誤差時：高 Kp 快速追蹤，低 Kd 減少阻力
+        - 小誤差時：低 Kp 避免震盪，高 Kd 增加穩定性
+        - 正常時：使用基礎值
+        
+        Args:
+            joint_idx: 關節索引 (0-6)
+            position_error: 位置誤差 (target - actual)
+        
+        Returns:
+            tuple: (kp, kd)
+        """
+        # 只對指定關節使用動態調整，其他關節使用靜態值
+        if joint_idx not in DYNAMIC_KP_KD_JOINTS:
+            return BASE_KP[joint_idx], BASE_KD[joint_idx]
+        
+        abs_error = abs(position_error)
+        
+        if abs_error > LARGE_ERROR_THRESHOLD:
+            # 大誤差：高剛度快速追蹤
+            kp = BASE_KP[joint_idx] * LARGE_ERROR_KP_SCALE
+            kd = BASE_KD[joint_idx] * LARGE_ERROR_KD_SCALE
+        elif abs_error < SMALL_ERROR_THRESHOLD:
+            # 小誤差：低剛度避免震盪
+            kp = BASE_KP[joint_idx] * SMALL_ERROR_KP_SCALE
+            kd = BASE_KD[joint_idx] * SMALL_ERROR_KD_SCALE
+        else:
+            # 正常範圍：使用基礎值
+            kp = BASE_KP[joint_idx]
+            kd = BASE_KD[joint_idx]
+        
+        # 限制在安全範圍內
+        kp = min(kp, 500.0)
+        kd = min(kd, 5.0)
+        
+        return kp, kd
+    
     def _gripper_to_motor(self, joint_value: float) -> float:
         """夾爪位置轉換：Unity (0~0.0425m) → 馬達弧度"""
         # 參考 v10_simple_hardware.cpp
@@ -662,18 +734,39 @@ class UnityFollowerInterface(Node):
                 self.right_velocity_ff = [0.0] * 7
             
             # 計算重力補償力矩（簡化版本，模仿 C++ 邏輯）
-            left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos, "left")
-            right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos, "right")
+            # [2026-02-05] 測試關閉重力補償，觀察是否消除「山峰」現象
+            # left_comp = self._calculate_gravity_compensation(self.left_arm, left_pos, "left")
+            # right_comp = self._calculate_gravity_compensation(self.right_arm, right_pos, "right")
+            left_comp = [0.0] * 7
+            right_comp = [0.0] * 7
             
             # 建立 MIT 命令（包含速度前饋和重力補償力矩）
-            left_arm_cmds = [
-                oa.MITParam(KP[i], KD[i], left_pos[i], self.left_velocity_ff[i], left_comp[i]) 
-                for i in range(7)
-            ]
-            right_arm_cmds = [
-                oa.MITParam(KP[i], KD[i], right_pos[i], self.right_velocity_ff[i], right_comp[i]) 
-                for i in range(7)
-            ]
+            if USE_DYNAMIC_KP_KD:
+                # 動態 Kp/Kd：根據誤差大小調整
+                left_motors = self.left_arm.get_arm().get_motors()
+                right_motors = self.right_arm.get_arm().get_motors()
+                left_actual = [m.get_position() for m in left_motors]
+                right_actual = [m.get_position() for m in right_motors]
+                
+                left_arm_cmds = []
+                right_arm_cmds = []
+                for i in range(7):
+                    left_error = left_pos[i] - left_actual[i]
+                    right_error = right_pos[i] - right_actual[i]
+                    left_kp, left_kd = self._get_dynamic_kp_kd(i, left_error)
+                    right_kp, right_kd = self._get_dynamic_kp_kd(i, right_error)
+                    left_arm_cmds.append(oa.MITParam(left_kp, left_kd, left_pos[i], self.left_velocity_ff[i], left_comp[i]))
+                    right_arm_cmds.append(oa.MITParam(right_kp, right_kd, right_pos[i], self.right_velocity_ff[i], right_comp[i]))
+            else:
+                # 靜態 Kp/Kd
+                left_arm_cmds = [
+                    oa.MITParam(KP[i], KD[i], left_pos[i], self.left_velocity_ff[i], left_comp[i]) 
+                    for i in range(7)
+                ]
+                right_arm_cmds = [
+                    oa.MITParam(KP[i], KD[i], right_pos[i], self.right_velocity_ff[i], right_comp[i]) 
+                    for i in range(7)
+                ]
             
             left_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, left_grip, 0.0, 0.0)]
             
