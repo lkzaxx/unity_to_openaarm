@@ -87,3 +87,22 @@
    - 已配置為繞過 Claude API 餘額不足的限制：
      - **主要模型**: `openai/gpt-5.2-codex`
      - **備用模型**: `anthropic/claude-opus-4-6`
+
+---
+
+## 7. 已知衝突與注意事項 (硬體控制端)
+
+### CAN Bus 佇列溢位與手臂震盪問題
+因為 OpenClaw 背景服務（如 Node.js, Docker, Nginx 等）增加了作業系統的常駐負載，這會導致 Linux 系統的進程切換稍微變頻繁。
+當 OpenArm 執行高頻 (500Hz) 的 MIT 馬達控制時：
+* Linux CAN 介面預設的發送佇列長度 (`qlen` / `txqueuelen`) 只有 **10**。
+* 在稍微忙碌的系統下，瞬間送出 7 顆馬達的指令會導致佇列瞬間溢滿，**造成 Linux 核心直接丟棄 (Drop) 後續的馬達控制封包**。
+* **症狀**：手臂因為連續漏接指令而產生嚴重的抽搐與劇烈震盪，且無法抵達目標位置。
+
+**解決方案**：
+若觀察到異常震盪，請務必確認您的 `/home/idaka/ros2_ws/scripts/cansetup.sh` 中已加入加大佇列的設定：
+```bash
+sudo ip link set can1 txqueuelen 1000
+sudo ip link set can2 txqueuelen 1000
+```
+每次重開機後，都必須執行套用新的 `txqueuelen`，方能確保高頻控制不掉包。
