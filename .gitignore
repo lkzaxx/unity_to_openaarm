@@ -77,3 +77,9 @@ Makefile
 # Templates/
 # Videos/
 
+# OpenClaw
+openclaw_src/
+.openclaw/
+openclaw/.env
+openclaw/venv/
+## openclaw/logs/

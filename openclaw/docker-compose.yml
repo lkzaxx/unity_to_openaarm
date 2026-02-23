@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  openclaw-core:
+    # 選擇適用於 ARM64/Jetpack 版本的映像檔
+    image: openclaw/core:latest-arm64
+    container_name: openclaw_jetson
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ~/openclaw/config:/app/config
+      - ~/openclaw/logs:/app/logs
+      - ~/openclaw/data:/app/data
+      # 視需求掛載 CSI 相機或 USB 相機
+      - /tmp/argus_socket:/tmp/argus_socket
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+    # 網路與 IPC 模式設為 host 以利 ROS2 通訊
+    network_mode: "host"
+    ipc: "host"
+    # GPU 資源保留
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
