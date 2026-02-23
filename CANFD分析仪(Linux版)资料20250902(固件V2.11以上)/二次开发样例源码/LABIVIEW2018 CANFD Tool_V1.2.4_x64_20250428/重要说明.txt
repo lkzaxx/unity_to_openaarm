@@ -1,4 +1,0 @@
-﻿1、\bin文件夹为了工程成的exe所以目录
-2、\bin\bin文件夹下面为二次开发DLL库，来自资料包\二次开发库V1.21\x86\ControlCANFD.dll
-3、需要把ControlCANFD.dll文件名改为zlgcan.dll
-4、样例调用的DLL名为zlgcan.dll

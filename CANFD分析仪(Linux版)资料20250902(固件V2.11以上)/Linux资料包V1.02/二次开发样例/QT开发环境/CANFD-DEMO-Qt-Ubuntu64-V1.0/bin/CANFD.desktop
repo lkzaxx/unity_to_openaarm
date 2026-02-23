@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=CANFD
-Comment=CANFD_test_tool
-Exec=CANFD
-Icon=logo
-Categories=Application;
-X-AppImage-Version=56a270f
