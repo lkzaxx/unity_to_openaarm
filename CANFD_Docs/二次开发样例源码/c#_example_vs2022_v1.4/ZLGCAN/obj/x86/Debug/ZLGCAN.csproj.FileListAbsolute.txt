@@ -1,0 +1,10 @@
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\bin\x86\Debug\ZLGCAN.exe.config
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\bin\x86\Debug\ZLGCAN.exe
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\bin\x86\Debug\ZLGCAN.pdb
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCAN.csproj.AssemblyReference.cache
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCANDemo.CANForm.resources
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCAN.Properties.Resources.resources
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCAN.csproj.GenerateResource.cache
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCAN.csproj.CoreCompileInputs.cache
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCAN.exe
+F:\PRJ_TTC\CANFD\DEMO\c#_example_vs2022_v1.4\ZLGCAN\obj\x86\Debug\ZLGCAN.pdb

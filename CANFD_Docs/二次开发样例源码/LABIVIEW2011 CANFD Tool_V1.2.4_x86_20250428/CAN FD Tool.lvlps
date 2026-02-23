@@ -1,0 +1,56 @@
+[项目窗口数据(_D)]
+ProjectExplorer.ClassicPosition[String] = "150,814,809,1276"
+
+[ProjectWindow_Data]
+ProjectExplorer.ClassicPosition[String] = "87,321,600,723"
+
+[AB_Cache_{C59B682A-A74C-4C0E-8AFD-98B89BF2DD49}]
+Cache_ProjSymbolChksum[String] = "7dea362b3fac8e00956a4952a3d4f474"
+Cache_TargetSymbolChksum[String] = "7dea362b3fac8e00956a4952a3d4f474"
+Cache_MyCompChksum[String] = "2eef9dc86e3cb963e35db4d9b47c5be1"
+Cache_GenFile_Count[Integer] = 4
+Cache_GenFile[0][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[0][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[0][Path] Line0003 = "ANFD Tool.exe"
+Cache_GenFile[1][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[1][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[1][Path] Line0003 = "ANFD Tool.aliases"
+Cache_GenFile[2][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[2][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[2][Path] Line0003 = "ANFD Tool.ini"
+Cache_GenFile[3][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[3][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[3][Path] Line0003 = "ontrolCANFD.dll"
+Cache_GenGUID_Count[Integer] = 4
+Cache_GenGUID[0][String] = "{5A76E44A-0236-4170-BAA3-B3721DB8DEFA}"
+Cache_GenGUID[1][String] = "{7A4FCA00-10E4-48FB-AEA2-F4E651954586}"
+Cache_GenGUID[2][String] = "{54D632AB-91D9-423E-845D-F7A8DC1511D8}"
+Cache_GenGUID[3][String] = "{4FAE6888-B640-4A09-A7F8-91BBEC6F5334}"
+Cache_OutputDir[Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIEW"
+Cache_OutputDir[Path] Line0002 = "2011 CANFD Tool_V1.2.4_x86_20250428/Build"
+
+[AB_Cache_{58C4E053-39C3-4DD4-8C06-8443EA210AC5}]
+Cache_ProjSymbolChksum[String] = "7dea362b3fac8e00956a4952a3d4f474"
+Cache_TargetSymbolChksum[String] = "7dea362b3fac8e00956a4952a3d4f474"
+Cache_MyCompChksum[String] = "2eef9dc86e3cb963e35db4d9b47c5be1"
+Cache_GenFile_Count[Integer] = 4
+Cache_GenFile[0][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[0][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[0][Path] Line0003 = "ANFD Tool.exe"
+Cache_GenFile[1][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[1][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[1][Path] Line0003 = "ANFD Tool.aliases"
+Cache_GenFile[2][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[2][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[2][Path] Line0003 = "ANFD Tool.ini"
+Cache_GenFile[3][Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIE"
+Cache_GenFile[3][Path] Line0002 = "W2011 CANFD Tool_V1.2.4_x86_20250428/Build/C"
+Cache_GenFile[3][Path] Line0003 = "ontrolCANFD.dll"
+Cache_GenGUID_Count[Integer] = 4
+Cache_GenGUID[0][String] = "{5A76E44A-0236-4170-BAA3-B3721DB8DEFA}"
+Cache_GenGUID[1][String] = "{7A4FCA00-10E4-48FB-AEA2-F4E651954586}"
+Cache_GenGUID[2][String] = "{54D632AB-91D9-423E-845D-F7A8DC1511D8}"
+Cache_GenGUID[3][String] = "{4FAE6888-B640-4A09-A7F8-91BBEC6F5334}"
+Cache_OutputDir[Path] Line0001 = "/C/Users/ttc52/Desktop/DHC FD LV2018/LABIVIEW"
+Cache_OutputDir[Path] Line0002 = "2011 CANFD Tool_V1.2.4_x86_20250428/Build"
+
