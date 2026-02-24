@@ -183,11 +183,77 @@ sudo usermod -aG dialout $USER
 
 ---
 
-## 8. OpenClaw 系統整合注意事項
+## 8. 系統資源爭奪與即時控制穩定性
 
-當在本機套用 OpenClaw (或其它提供 LLM 遙操作介面) 這類資源較密集的背景控制與 AI 服務時，系統資源爭奪通常是穩定度殺手：
-1. **底層 CAN 佇列遭夾擠**: 即為 [4.1 節](#41-can-介面預設佇列過短問題-txqueuelen) 所述情形。OpenClaw 的一系列背景服務會使得 Linux 排程與 Context Switch 變得更具防禦性。**絕對要在每次開機啟動 `cansetup.sh` 時確認有加入 `txqueuelen 1000`。**
+Jetson 宿主機僅有 **7.6 GB** 的物理記憶體。當同時運行多個服務時，系統資源會被嚴重瓜分，導致 500Hz 的即時控制迴圈無法準時執行，最終引發手臂震盪。
+
+### 8.1 各進程記憶體佔用實測 (2026-02-24)
+以下為手臂控制期間，各背景服務佔用的記憶體與 CPU 實測數據：
+
+| 進程名稱 | RSS 記憶體 | CPU | 說明 |
+|----------|-----------|-----|------|
+| **Antigravity 語言伺服器** | **~1.5 GB** | 100% | AI 程式助手後端，吃資源最兇 |
+| **Cursor Extension Host** (×2) | **~770 MB** | ~10% | VS Code 遠端開發擴展 |
+| **OpenClaw Gateway** | **~378 MB** | <1% | LLM 遙操作閘道 |
+| **unity_interface_follower.py** | ~213 MB | ~24% | 手臂控制核心 |
+| **camera_publisher.py** | ~151 MB | ~6% | ROS2 攝影機發佈 |
+| **GNOME Desktop** | ~190 MB | <1% | 圖形桌面環境 |
+| **nvargus-daemon** | ~252 MB | <1% | NVIDIA 攝影機守護程式 |
+| **其他 (Nginx, Docker, 等)** | ~200 MB | - | 背景服務 |
+| **合計** | **~3.7 GB+** | - | 剩餘可用記憶體僅約 134 MB |
+
+> [!CAUTION]
+> 當可用記憶體低於約 200 MB 時，Linux 核心會頻繁進行記憶體回收與 Swap 交換操作，這會造成突發性的進程凍結 (stall)，直接破壞 500Hz 控制迴圈的即時性。
+
+### 8.2 CAN 封包掉落的兩個方向
+即使 `txqueuelen` 已設為 1000，封包仍可能在**接收方向 (RX)** 掉落：
+```bash
+# 檢查 CAN 封包統計
+ip -s link show can1
+```
+| 方向 | 含義 | 正常值 | 異常值 |
+|------|------|--------|--------|
+| **TX dropped** | 發送給馬達的指令被丟棄 | 0 | >0 → 加大 `txqueuelen` |
+| **RX dropped** | 馬達回傳的狀態被丟棄 | 0 | >0 → **系統 CPU/記憶體不足**，控制程式來不及讀取 |
+
+當 RX dropped 持續增加時，代表 `unity_interface_follower.py` 無法及時從 CAN 介面讀回馬達狀態，導致控制迴圈計算使用過舊的位置數據，進而使得 Kp 產生錯誤的校正力矩引發震盪。
+
+### 8.3 治標：操控手臂期間釋放資源
+在需要操控手臂進行精密控制時，建議暫時關閉以下不必要的服務以釋放記憶體和 CPU：
+
+```bash
+# 1. 關閉 VS Code / Cursor 的遠端擴展 (節省 ~2.3 GB)
+#    → 直接在 PC 端關閉 VS Code Remote SSH 視窗即可
+
+# 2. 停止 OpenClaw Gateway (節省 ~378 MB)
+sudo docker stop openclaw-gateway  # 如以 Docker 運行
+# 或
+pkill -f openclaw-gateway           # 如以原生進程運行
+
+# 3. 關閉桌面環境 (含相關附屬服務可節省高達 600~800 MB，強烈建議在純 SSH / VSCode Remote 操作時執行)
+sudo systemctl stop gdm3
+
+# 若想讓系統每次開機都不啟動圖形介面 (永久生效以確保資源充足)：
+sudo systemctl set-default multi-user.target
+```
+
+### 8.4 治本：提升控制程式優先級
+若必須同時運行 AI 服務與手臂控制，可將控制程式提升為 Linux 即時排程優先級，讓它搶到 CPU 時間：
+```bash
+# 以 FIFO 即時排程策略啟動 follower (優先級 50)
+sudo chrt -f 50 python3 unity_interface_follower.py
+```
+或者對已經在運行的程式動態調整：
+```bash
+# 查詢 follower 的 PID
+pgrep -f unity_interface_follower
+# 動態提升優先級
+sudo chrt -f -p 50 <PID>
+```
+
+### 8.5 OpenClaw 相關設定提醒
+1. **底層 CAN 佇列**: 即為 [4.1 節](#41-can-介面預設佇列過短問題-txqueuelen) 所述情形。**絕對要在每次開機啟動 `cansetup.sh` 時確認有加入 `txqueuelen 1000`。**
 2. **記憶體 Swap 依賴不可關閉**: 系統已建立 16GB 的 `/swapfile` 交換空間以及 `vm.swappiness = 30` 來支援大型 AI 容器模型，請勿隨便撤銷。
-3. **Nginx 反向代理與目錄設定**: 為繞過跨域同源政策並支援 WebSockets 即時終端，系統已設置 Nginx 反向代理與自簽 SSL，這也是系統必須將 `/home/idaka/.openclaw/canvas` 對外開放為靜態資源資料夾的主因。
+3. **Nginx 反向代理與目錄設定**: 為繞過跨域同源政策並支援 WebSockets 即時終端，系統已設置 Nginx 反向代理與自簽 SSL。
 
 > 關於 OpenClaw 的詳細環境依賴與 Nginx 設定細節，請參閱：[`/home/idaka/openclaw/OPENCLAW_EXTERNAL_CONFIGS.md`](../../../../openclaw/OPENCLAW_EXTERNAL_CONFIGS.md)。
