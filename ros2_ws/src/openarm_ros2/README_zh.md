@@ -192,18 +192,25 @@ Jetson 宿主機僅有 **7.6 GB** 的物理記憶體。當同時運行多個服�
 
 | 進程名稱 | RSS 記憶體 | CPU | 說明 |
 |----------|-----------|-----|------|
-| **Antigravity 語言伺服器** | **~1.5 GB** | 100% | AI 程式助手後端，吃資源最兇 |
-| **Cursor Extension Host** (×2) | **~770 MB** | ~10% | VS Code 遠端開發擴展 |
-| **OpenClaw Gateway** | **~378 MB** | <1% | LLM 遙操作閘道 |
-| **unity_interface_follower.py** | ~213 MB | ~24% | 手臂控制核心 |
-| **camera_publisher.py** | ~151 MB | ~6% | ROS2 攝影機發佈 |
-| **GNOME Desktop** | ~190 MB | <1% | 圖形桌面環境 |
-| **nvargus-daemon** | ~252 MB | <1% | NVIDIA 攝影機守護程式 |
-| **其他 (Nginx, Docker, 等)** | ~200 MB | - | 背景服務 |
-| **合計** | **~3.7 GB+** | - | 剩餘可用記憶體僅約 134 MB |
+### 8.1 各進程記憶體佔用實測 (2026-02-24)
+以下為開啟圖形介面與相機功能後，各背景服務實際佔用的記憶體排行榜 (Top 10)：
+
+| 進程名稱 | RSS 記憶體 (MB) | 說明 |
+|----------|-----------|------|
+| **Antigravity 語言伺服器** | **~441 MB** | AI 程式助手後端 (之前達 1.5GB，重啟後減輕) |
+| **Node.js (含 Cursor)** | **~405 MB** | VS Code 遠端開發擴展主控 |
+| **OpenClaw Gateway** | **~350 MB** | LLM 遙操作閘道 |
+| **gnome-shell** | **~205 MB** | 桌面圖形化介面 |
+| **Node.js 子進程** | ~176 MB | VS Code 檔案追蹤等附屬功能 |
+| **gnome-software** | ~152 MB | 軟體中心背景服務 |
+| **Node.js 子進程** | ~120 MB | VS Code 其他擴展 |
+| **nvargus-daemon** | ~119 MB | NVIDIA 攝影機硬體加速守護程式 |
+| **Node.js 子進程** | ~107 MB | VS Code 其他擴展 |
+| **Node.js 子進程** | ~106 MB | VS Code 其他擴展 |
+| **合計** | **~2.1 GB+** | (本次測量時可用記憶體狀態較為健康，尚餘 4.3GB 空閒) |
 
 > [!CAUTION]
-> 當可用記憶體低於約 200 MB 時，Linux 核心會頻繁進行記憶體回收與 Swap 交換操作，這會造成突發性的進程凍結 (stall)，直接破壞 500Hz 控制迴圈的即時性。
+> 雖然上述大頭加起來只佔約 2GB，但 Jetson 系統內另外還跑了超過 300 支背景程式，通常會默默吃掉另外 2GB~3GB 的記憶體。當可用記憶體低於約 200 MB 時，Linux 核心會頻繁進行 Swap 交換操作，造成突發性的進程凍結 (stall)，直接破壞 500Hz 控制迴圈的即時性。
 
 ### 8.2 CAN 封包掉落的兩個方向
 即使 `txqueuelen` 已設為 1000，封包仍可能在**接收方向 (RX)** 掉落：
@@ -219,23 +226,26 @@ ip -s link show can1
 當 RX dropped 持續增加時，代表 `unity_interface_follower.py` 無法及時從 CAN 介面讀回馬達狀態，導致控制迴圈計算使用過舊的位置數據，進而使得 Kp 產生錯誤的校正力矩引發震盪。
 
 ### 8.3 治標：操控手臂期間釋放資源
-在需要操控手臂進行精密控制時，建議暫時關閉以下不必要的服務以釋放記憶體和 CPU：
+在不需要同時使用 AI 擴展時，可暫停不必要的服務以釋放記憶體：
 
 ```bash
-# 1. 關閉 VS Code / Cursor 的遠端擴展 (節省 ~2.3 GB)
+# 1. 關閉 VS Code / Cursor 的遠端擴展 (節省 ~1 GB 以上)
 #    → 直接在 PC 端關閉 VS Code Remote SSH 視窗即可
 
-# 2. 停止 OpenClaw Gateway (節省 ~378 MB)
+# 2. 停止 OpenClaw Gateway (節省 ~350 MB)
 sudo docker stop openclaw-gateway  # 如以 Docker 運行
 # 或
 pkill -f openclaw-gateway           # 如以原生進程運行
 
-# 3. 關閉桌面環境 (含相關附屬服務可節省高達 600~800 MB，強烈建議在純 SSH / VSCode Remote 操作時執行)
+# 3. 關閉桌面環境 (純 SSH 操作時可省 600~800 MB)
 sudo systemctl stop gdm3
-
-# 若想讓系統每次開機都不啟動圖形介面 (永久生效以確保資源充足)：
+# 若想讓系統每次開機都不啟動圖形介面：
 sudo systemctl set-default multi-user.target
 ```
+
+> [!WARNING]
+> **關閉桌面環境 (gdm3) 的副作用：相機失效**
+> 若您有關閉桌面環境，`camera_publisher.py` 會無法讀取 IMX219 相機畫面 (報錯 `Failed to read camera frame`)。這是因為 NVIDIA 的 `nvarguscamerasrc` GStreamer 插件高度依賴 X11/Wayland 或 EGL 顯示伺服器來分配 NVMM 緩衝區。**如果您需要將實體相機畫面傳回 Unity，請保持桌面環境開啟，並改用 [8.4 節](#84-治本提升控制程式優先級) 的作法來確保穩定性。**
 
 ### 8.4 治本：提升控制程式優先級
 若必須同時運行 AI 服務與手臂控制，可將控制程式提升為 Linux 即時排程優先級，讓它搶到 CPU 時間：
