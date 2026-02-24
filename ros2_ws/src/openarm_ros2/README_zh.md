@@ -188,26 +188,31 @@ sudo usermod -aG dialout $USER
 Jetson 宿主機僅有 **7.6 GB** 的物理記憶體。當同時運行多個服務時，系統資源會被嚴重瓜分，導致 500Hz 的即時控制迴圈無法準時執行，最終引發手臂震盪。
 
 ### 8.1 各進程記憶體佔用實測 (2026-02-24)
-以下為手臂控制期間，各背景服務佔用的記憶體與 CPU 實測數據：
+以下為開啟圖形介面與相機功能後，各背景服務實際佔用的記憶體排行榜 (Top 20)：
 
-| 進程名稱 | RSS 記憶體 | CPU | 說明 |
-|----------|-----------|-----|------|
-### 8.1 各進程記憶體佔用實測 (2026-02-24)
-以下為開啟圖形介面與相機功能後，各背景服務實際佔用的記憶體排行榜 (Top 10)：
-
-| 進程名稱 | RSS 記憶體 (MB) | 說明 |
+| 進程名稱 | RSS 記憶體 | 說明 |
 |----------|-----------|------|
-| **Antigravity 語言伺服器** | **~441 MB** | AI 程式助手後端 (之前達 1.5GB，重啟後減輕) |
-| **Node.js (含 Cursor)** | **~405 MB** | VS Code 遠端開發擴展主控 |
-| **OpenClaw Gateway** | **~350 MB** | LLM 遙操作閘道 |
-| **gnome-shell** | **~205 MB** | 桌面圖形化介面 |
-| **Node.js 子進程** | ~176 MB | VS Code 檔案追蹤等附屬功能 |
-| **gnome-software** | ~152 MB | 軟體中心背景服務 |
-| **Node.js 子進程** | ~120 MB | VS Code 其他擴展 |
-| **nvargus-daemon** | ~119 MB | NVIDIA 攝影機硬體加速守護程式 |
-| **Node.js 子進程** | ~107 MB | VS Code 其他擴展 |
-| **Node.js 子進程** | ~106 MB | VS Code 其他擴展 |
-| **合計** | **~2.1 GB+** | (本次測量時可用記憶體狀態較為健康，尚餘 4.3GB 空閒) |
+| **language_server (AI 助手)** | **~436 MB** | Antigravity 程式助手後端 |
+| **node (VS Code/Cursor)** | **~405 MB** | 遠端開發擴展主控 |
+| **openclaw-gateway** | **~344 MB** | LLM 遙操作閘道 |
+| **nvargus-daemon** | **~234 MB** | NVIDIA 攝影機硬體加速守護程式 |
+| **python3** | **~211 MB** | `unity_interface_follower.py` (高頻控制) |
+| **python3** | **~202 MB** | `camera_publisher.py` (節點發布) |
+| **gnome-shell** | **~200 MB** | 桌面圖形化介面主程 |
+| **node** | ~174 MB | VS Code 擴展附屬進程 (下同) |
+| **gnome-software** | ~172 MB | 軟體中心背景服務 |
+| **node** | ~118 MB | VS Code 擴展附屬進程 |
+| **node** | ~107 MB | VS Code 擴展附屬進程 |
+| **node** | ~107 MB | VS Code 擴展附屬進程 |
+| **dockerd** | ~91 MB | 容器服務守護行程 |
+| **node** | ~68 MB | VS Code 擴展附屬進程 |
+| **evolution-alarm** | ~67 MB | GNOME 附屬服務 |
+| **packagekitd** | ~65 MB | 套件管理後端服務 |
+| **node** | ~64 MB | VS Code 擴展附屬進程 |
+| **tailscaled** | ~62 MB | 網路代理服務 |
+| **containerd** | ~56 MB | 容器執行階段 |
+| **update-notifier** | ~45 MB | Ubuntu 更新通知服務 |
+| **合計** | **~3.2 GB+** | (本次測量時可用記憶體狀態較為健康，尚餘 4.3GB 空閒) |
 
 > [!CAUTION]
 > 雖然上述大頭加起來只佔約 2GB，但 Jetson 系統內另外還跑了超過 300 支背景程式，通常會默默吃掉另外 2GB~3GB 的記憶體。當可用記憶體低於約 200 MB 時，Linux 核心會頻繁進行 Swap 交換操作，造成突發性的進程凍結 (stall)，直接破壞 500Hz 控制迴圈的即時性。
