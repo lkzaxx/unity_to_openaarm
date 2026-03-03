@@ -1,0 +1,69 @@
+=== 夾取新位置方塊 ===
+1. J4 舉起 90°
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J4'], position=[1.5708], velocity=[], effort=[])
+
+2. 打開夾爪
+Waiting for at least 1 matching subscription(s)...
+Waiting for at least 1 matching subscription(s)...
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_EE'], position=[0.0425], velocity=[], effort=[])
+
+3. J1 旋轉到新位置 (往左調整)
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J1'], position=[0.047], velocity=[], effort=[])
+
+4. J2, J3 伸展
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J2', 'R_J3'], position=[0.62, 0.667], velocity=[], effort=[])
+
+5. J4, J6 放下對準
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J4', 'R_J6'], position=[0.277, 0.577], velocity=[], effort=[])
+
+6. 夾取方塊
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_EE'], position=[0.0], velocity=[], effort=[])
+
+   >>> 等待 3 秒穩定...
+7. J4 舉起方塊
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J4'], position=[1.5708], velocity=[], effort=[])
+
+8. J4 放下方塊
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J4'], position=[0.277], velocity=[], effort=[])
+
+   >>> 等待 3 秒穩定...
+9. 放開夾爪
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_EE'], position=[0.0425], velocity=[], effort=[])
+
+=== 開始歸零 ===
+10. J4 舉起
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J4'], position=[1.5708], velocity=[], effort=[])
+
+11. J6 歸 0
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J6'], position=[0.0], velocity=[], effort=[])
+
+12. J1 歸 0
+Waiting for at least 1 matching subscription(s)...
+Waiting for at least 1 matching subscription(s)...
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J1'], position=[0.0], velocity=[], effort=[])
+
+13. J2, J3, J5, J7 歸 0
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J2', 'R_J3', 'R_J5', 'R_J7'], position=[0.0, 0.0, 0.0, 0.0], velocity=[], effort=[])
+
+14. J4 歸 0
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_J4'], position=[0.0], velocity=[], effort=[])
+
+15. 夾爪歸 0
+publisher: beginning loop
+publishing #1: sensor_msgs.msg.JointState(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0), frame_id=''), name=['R_EE'], position=[0.0], velocity=[], effort=[])
+
+=== 完成！ ===

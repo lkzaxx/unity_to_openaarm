@@ -10,7 +10,12 @@
 5. [控制系統與震盪問題排解](#5-控制系統與震盪問題排解)
 6. [HITBOT eHand-6 靈巧手整合](#6-hitbot-ehand-6-靈巧手整合)
 7. [TsingSens AmazingHand 開源靈巧手整合](#7-tsingsens-amazinghand-開源靈巧手整合)
-8. [OpenClaw 系統整合注意事項](#8-openclaw-系統整合注意事項)
+8. [系統資源爭奪與即時控制穩定性](#8-系統資源爭奪與即時控制穩定性)
+9. [獨立 Python 腳本控制導致的抖動問題](#9-獨立-python-腳本控制導致的抖動問題)
+10. [IMX219-83 立體相機使用說明](#10-imx219-83-立體相機使用說明)
+11. [監測手臂位置](#11-監測手臂位置)
+12. [夾爪控制](#12-夾爪控制)
+13. [關節正值方向參考](#13-關節正值方向參考)
 
 ---
 
@@ -37,7 +42,7 @@ OpenArm 單臂為 **7 自由度 (7-DOF)** 架構，全機共有 14 個達妙伺�
 | **3 (J3)** | `Shoulder Yaw` (肩部水平旋轉) | 控制整隻手臂的水平自轉扭轉 | -90° ~ +90° | -90° ~ +90° |
 | **4 (J4)** | `Elbow Pitch` (手肘俯仰) | 控制下手臂的屈曲與伸展 | 0° ~ +140° | 0° ~ +140° |
 | **5 (J5)** | `Wrist Roll` (手腕側翻) | 控制手腕的第一階扭轉 / 翻轉 | -90° ~ +90° | -90° ~ +90° |
-| **6 (J6)** | `Wrist Yaw` (手腕偏航) | 控制手腕向左 / 向右偏擺 | -45° ~ +45° | -45° ~ +45° |
+| **6 (J6)** | `Wrist Yaw` (手腕偏航) | 控制手腕向左 / 向右偏擺。**右手正值往內（靠近身體），左手相反** | -45° ~ +45° | -45° ~ +45° |
 | **7 (J7)** | `Wrist Pitch` (手腕俯仰) | 控制末端執行器 (手掌/夾爪) 向上翹起或下壓 | -90° ~ +90° | -90° ~ +90° |
 *(備註：實際硬體極限可能會因排線組裝干涉而有所縮減，軟體中預設會對極端角度做安全限制)*
 
@@ -272,3 +277,553 @@ sudo chrt -f -p 50 <PID>
 3. **Nginx 反向代理與目錄設定**: 為繞過跨域同源政策並支援 WebSockets 即時終端，系統已設置 Nginx 反向代理與自簽 SSL。
 
 > 關於 OpenClaw 的詳細環境依賴與 Nginx 設定細節，請參閱：[`/home/idaka/openclaw/OPENCLAW_EXTERNAL_CONFIGS.md`](../../../../openclaw/OPENCLAW_EXTERNAL_CONFIGS.md)。
+
+---
+
+## 9. 獨立 Python 腳本控制導致的抖動問題
+
+### 9.1 問題現象
+嘗試繞過 unity_interface_follower.py，直接使用獨立 Python 腳本調用 openarm_can 庫控制馬達時，會發生嚴重的手臂抖動，即使：
+- 記憶體充足（可用 > 3GB）
+- CAN txqueuelen 已設為 1000+
+- 無封包丟失（TX/RX dropped = 0）
+- 使用了與 unity_interface_follower.py 相同的 Kp/Kd 參數
+
+### 9.2 根本原因
+經測試確認，獨立腳本缺少 unity_interface_follower.py 的完整控制架構：
+
+| 項目 | unity_interface_follower (穩定) | 獨立 Python 腳本 (抖動) |
+|------|--------------------------------------|--------------------------|
+| 控制架構 | ROS2 節點 + 獨立線程 | 單一主線程 |
+| 控制循環 | 持續運行 500Hz | 移動完就結束 |
+| 雙臂控制 | 同時控制 can1 + can2 | 通常只控制單臂 |
+| 命令發送 | 交替發送左右臂命令 | 只發單臂命令 |
+| 結束處理 | 持續保持位置 | 調用 disable_all() |
+
+關鍵差異：
+1. 持續控制循環：即使沒有新目標，unity_interface_follower.py 仍持續以 500Hz 發送命令保持位置穩定
+2. 雙臂同步控制：CAN 總線上需要同時有雙臂的通訊才能穩定運作
+3. 獨立線程：控制循環在獨立線程中運行，不受其他操作的延遲影響
+
+### 9.3 正確的控制方式
+務必通過 unity_interface_follower.py + ROS2 topic 來控制手臂：
+
+1. 設置 CAN
+   cd ~/ros2_ws/scripts
+   ./cansetup.sh
+
+2. 啟動 Follower Interface
+   ./start_follower.sh
+
+3. 在另一個終端發送控制命令
+   ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['R_J1','R_J2','R_J3','R_J4','R_J5','R_J6','R_J7'], position: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}" --once
+
+> [!CAUTION]
+> 不要嘗試用獨立腳本直接控制馬達
+> 即使程式碼邏輯看似正確（有 rate limiting、正確的 Kp/Kd），缺少完整的 ROS2 控制架構仍會導致不穩定的抖動現象。若需要程式化控制，請透過發布 ROS2 topic 的方式與 unity_interface_follower.py 互動。
+
+
+---
+
+## 10. IMX219-83 立體相機使用說明
+
+### 10.1 硬體規格
+
+#### 基本資訊
+| 項目 | 規格 |
+|------|------|
+| **型號** | IMX219-83 Stereo Camera |
+| **感測器** | Sony IMX219 × 2（雙目） |
+| **單眼解析度** | 3280 × 2464（8MP） |
+| **CMOS 尺寸** | 1/4 英吋 |
+| **焦距** | 2.6mm |
+| **畸變** | < 1% |
+| **基線距離** | 60mm |
+| **尺寸** | 24mm × 85mm |
+| **連接介面** | CSI（連接至 Jetson） |
+
+#### 視角（FOV）
+| 方向 | 角度 |
+|------|------|
+| **對角線** | 83° |
+| **水平** | 73° |
+| **垂直** | 50° |
+
+#### 內建 IMU（ICM20948）
+| 感測器 | 解析度 | 量測範圍 |
+|--------|--------|----------|
+| **加速度計** | 16-bit | ±2, ±4, ±8, ±16 g |
+| **陀螺儀** | 16-bit | ±250, ±500, ±1000, ±2000 °/sec |
+| **磁力計** | 16-bit | ±4900 μT |
+
+#### 目前使用設定
+| 項目 | 設定值 |
+|------|--------|
+| **發佈解析度** | 640 × 480（可調） |
+| **發佈幀率** | 15 FPS（可調） |
+| **JPEG 品質** | 50（可調） |
+
+> [!NOTE]
+> **硬體同步限制**：IMX219-83 不具備硬體同步功能，雙目同步較困難。適用於 AI 視覺應用如深度視覺、立體視覺等。
+
+> **規格來源**：[Waveshare Wiki](https://www.waveshare.com/wiki/IMX219-83_Stereo_Camera)
+
+### 10.2 啟動方式
+
+相機發佈節點已整合在 `start_follower.sh` 中，執行該腳本時會自動啟動：
+
+```bash
+cd ~/ros2_ws/scripts
+./start_follower.sh
+```
+
+啟動順序：
+1. `cansetup.sh` - 設置 CAN 介面
+2. `ros_tcp_endpoint` - ROS-Unity 橋接（背景）
+3. `camera_publisher.py` - 相機發佈（背景）
+4. `unity_interface_follower.py` - 手臂控制（前景）
+
+### 10.3 單獨啟動相機
+
+若只需要相機功能，不需要手臂控制：
+
+```bash
+# 1. Source ROS2 環境
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+# 2. 設定 DISPLAY（nvarguscamerasrc 需要）
+export DISPLAY=:0
+
+# 3. 啟動相機發佈節點
+python3 ~/ros2_ws/src/openarm_ros2/openarm_bringup/scripts/camera_publisher.py
+```
+
+### 10.4 ROS2 Topics
+
+| Topic | 類型 | 說明 |
+|-------|------|------|
+| `/camera/left/compressed` | `sensor_msgs/CompressedImage` | 左眼壓縮影像 |
+| `/camera/right/compressed` | `sensor_msgs/CompressedImage` | 右眼壓縮影像 |
+
+### 10.5 可調參數
+
+啟動時可透過 `--ros-args` 調整參數：
+
+```bash
+python3 camera_publisher.py --ros-args \
+    -p width:=640 \
+    -p height:=480 \
+    -p fps:=15 \
+    -p jpeg_quality:=50 \
+    -p enable_left:=true \
+    -p enable_right:=true \
+    -p use_test_pattern:=false
+```
+
+| 參數 | 預設值 | 說明 |
+|------|--------|------|
+| `width` | 640 | 影像寬度 |
+| `height` | 480 | 影像高度 |
+| `fps` | 15 | 幀率 |
+| `jpeg_quality` | 90 | JPEG 壓縮品質（1-100），`start_follower.sh` 中設為 50 以節省頻寬 |
+| `enable_left` | true | 啟用左眼相機 |
+| `enable_right` | true | 啟用右眼相機 |
+| `use_test_pattern` | false | 使用測試圖案（無實體相機時用於測試） |
+
+### 10.6 檢視影像
+
+在另一個終端檢視相機是否正常發佈：
+
+```bash
+# 檢查 topic 是否存在
+ros2 topic list | grep camera
+
+# 檢查發佈頻率
+ros2 topic hz /camera/left/compressed
+
+# 檢視影像資訊
+ros2 topic echo /camera/left/compressed --no-arr
+```
+
+### 10.7 常見問題
+
+#### 問題：Failed to read camera frame
+
+**原因**：桌面環境未啟動。`nvarguscamerasrc` GStreamer 插件需要 X11/Wayland 顯示伺服器。
+
+**解決方案**：
+```bash
+# 確保桌面環境正在運行
+sudo systemctl start gdm3
+
+# 設定 DISPLAY 環境變數
+export DISPLAY=:0
+```
+
+> [!WARNING]
+> 如需使用相機功能，請勿關閉桌面環境 (gdm3)。詳見 [8.3 節](#83-治標操控手臂期間釋放資源) 的說明。
+
+#### 問題：相機畫面延遲或卡頓
+
+**可能原因**：
+1. 網路頻寬不足
+2. JPEG 品質設定過高
+
+**解決方案**：
+```bash
+# 降低 JPEG 品質以減少頻寬使用
+python3 camera_publisher.py --ros-args -p jpeg_quality:=30
+
+# 或降低解析度
+python3 camera_publisher.py --ros-args -p width:=320 -p height:=240
+```
+
+### 10.8 記憶體使用
+
+`camera_publisher.py` 約佔用 **200 MB** 記憶體。若系統記憶體緊張，可考慮：
+- 只啟用單眼相機（`-p enable_right:=false`）
+- 降低解析度和幀率
+
+
+---
+
+## 11. 監測手臂位置
+
+### 11.1 ROS2 Topic
+
+`unity_interface_follower.py` 會以 50 Hz 頻率發佈手臂關節狀態：
+
+| Topic | 類型 | 頻率 | 說明 |
+|-------|------|------|------|
+| `/openarm/joint_states` | `sensor_msgs/JointState` | 50 Hz | 雙臂 14 個關節的位置、速度、力矩 |
+
+### 11.2 即時監測指令
+
+```bash
+# 檢視即時關節狀態（位置、速度、力矩）
+ros2 topic echo /openarm/joint_states
+
+# 只看位置數值（簡化輸出）
+ros2 topic echo /openarm/joint_states --field position
+
+# 檢視發佈頻率
+ros2 topic hz /openarm/joint_states
+
+# 單次檢視（不持續更新）
+ros2 topic echo /openarm/joint_states --once
+```
+
+### 11.3 JointState 訊息格式
+
+```yaml
+header:
+  stamp: {sec: ..., nanosec: ...}
+  frame_id: ''
+name: ['R_J1', 'R_J2', 'R_J3', 'R_J4', 'R_J5', 'R_J6', 'R_J7',
+       'L_J1', 'L_J2', 'L_J3', 'L_J4', 'L_J5', 'L_J6', 'L_J7']
+position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,   # 右臂 R_J1~R_J7 (rad)
+           0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # 左臂 L_J1~L_J7 (rad)
+velocity: [...]   # 各關節速度 (rad/s)
+effort: [...]     # 各關節力矩 (Nm)
+```
+
+### 11.4 關節名稱對照
+
+| 索引 | 名稱 | 說明 |
+|------|------|------|
+| 0 | R_J1 | 右臂關節 1（肩部旋轉） |
+| 1 | R_J2 | 右臂關節 2（肩部抬升） |
+| 2 | R_J3 | 右臂關節 3（上臂旋轉） |
+| 3 | R_J4 | 右臂關節 4（肘部） |
+| 4 | R_J5 | 右臂關節 5（前臂旋轉） |
+| 5 | R_J6 | 右臂關節 6（腕部俯仰） |
+| 6 | R_J7 | 右臂關節 7（腕部旋轉） |
+| 7 | L_J1 | 左臂關節 1（肩部旋轉） |
+| 8 | L_J2 | 左臂關節 2（肩部抬升） |
+| 9 | L_J3 | 左臂關節 3（上臂旋轉） |
+| 10 | L_J4 | 左臂關節 4（肘部） |
+| 11 | L_J5 | 左臂關節 5（前臂旋轉） |
+| 12 | L_J6 | 左臂關節 6（腕部俯仰） |
+| 13 | L_J7 | 左臂關節 7（腕部旋轉） |
+
+### 11.5 Python 程式監測範例
+
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+
+class JointMonitor(Node):
+    def __init__(self):
+        super().__init__('joint_monitor')
+        self.subscription = self.create_subscription(
+            JointState,
+            '/openarm/joint_states',
+            self.callback,
+            10
+        )
+
+    def callback(self, msg):
+        # 取得右臂 J1 位置（弧度）
+        r_j1_pos = msg.position[0]
+        # 轉換為角度
+        r_j1_deg = r_j1_pos * 180.0 / 3.14159
+        self.get_logger().info(f'R_J1: {r_j1_deg:.2f} deg')
+
+def main():
+    rclpy.init()
+    node = JointMonitor()
+    rclpy.spin(node)
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### 11.6 Unity 端接收
+
+Unity 透過 `ros_tcp_endpoint` 訂閱 `/openarm/joint_states` 即可取得手臂位置，用於視覺化或同步虛擬手臂。
+
+
+---
+
+## 12. 夾爪控制
+
+### 12.1 控制方式
+
+夾爪透過 `/unity/joint_commands` topic 控制，與手臂關節使用相同的介面。
+
+| 項目 | 說明 |
+|------|------|
+| **Topic** | `/unity/joint_commands` |
+| **類型** | `sensor_msgs/JointState` |
+| **左夾爪 Joint 名稱** | `L_EE` |
+| **右夾爪 Joint 名稱** | `R_EE` |
+| **Position 範圍** | `0` ~ `0.0425`（米） |
+| **0** | 完全關閉 |
+| **0.0425** | 完全打開 |
+
+### 12.2 控制指令範例
+
+#### 打開右夾爪
+```bash
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['R_EE'], position: [0.0425]}" --once
+```
+
+#### 關閉右夾爪
+```bash
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['R_EE'], position: [0.0]}" --once
+```
+
+#### 打開左夾爪
+```bash
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['L_EE'], position: [0.0425]}" --once
+```
+
+#### 關閉左夾爪
+```bash
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['L_EE'], position: [0.0]}" --once
+```
+
+#### 同時控制雙夾爪
+```bash
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['L_EE', 'R_EE'], position: [0.0425, 0.0425]}" --once
+```
+
+### 12.3 夾爪與手臂同時控制
+
+可以在同一個指令中同時控制手臂關節和夾爪：
+
+```bash
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['R_J1', 'R_J2', 'R_J3', 'R_J4', 'R_J5', 'R_J6', 'R_J7', 'R_EE'], position: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0425]}" --once
+```
+
+### 12.4 注意事項
+
+> [!WARNING]
+> **夾爪控制需要 Follower 運行中**
+> 夾爪控制指令透過 `unity_interface_follower.py` 處理。請確保已執行 `start_follower.sh` 啟動控制節點。
+
+> [!TIP]
+> **位置單位是米（m）**
+> Position 值代表夾爪開合距離，單位是米。0.0425m = 4.25cm 為最大開度。
+
+
+---
+
+## 13. 關節正值方向參考
+
+> **視角說明**：從機器人**後方**看（面對機器人背部），機器人前方為正方向。
+
+### 13.1 左臂正值方向（+1.5 rad）
+
+| 關節 | 名稱 | 正值方向 | 旋轉方向 |
+|------|------|----------|----------|
+| J1 | 基座旋轉 | 往後（遠離前方） | - |
+| J2 | 肩部上下 | 整隻手往身體靠（內收） | 逆時針 |
+| J3 | 上臂旋轉 | 以垂直軸往身體旋轉 | 順時針 |
+| J4 | 肘部 | 肘往上（前） | - |
+| J5 | 手腕旋轉1 | 以垂直軸往身體旋轉 | 順時針 |
+| J6 | 手腕旋轉2 | 手往身體外轉 | 順時針 |
+| J7 | 手腕旋轉3 | 手往後 | - |
+
+### 13.2 右臂正值方向（+1.5 rad）
+
+| 關節 | 名稱 | 正值方向 | 旋轉方向 |
+|------|------|----------|----------|
+| J1 | 基座旋轉 | 往前（朝向前方） | - |
+| J2 | 肩部上下 | 整隻手往身體外靠（外展） | 逆時針 |
+| J3 | 上臂旋轉 | 以垂直軸往身體外旋轉 | 順時針 |
+| J4 | 肘部 | 肘往上（前） | - |
+| J5 | 手腕旋轉1 | 以垂直軸往身體外旋轉 | 順時針 |
+| J6 | 手腕旋轉2 | 手往身體轉（內轉） | 順時針 |
+| J7 | 手腕旋轉3 | 手往前 | - |
+
+### 13.3 左右臂對稱性
+
+| 關節 | 左臂正值 | 右臂正值 | 關係 |
+|------|----------|----------|------|
+| J1 | 往後 | 往前 | **相反** |
+| J2 | 往身體靠 | 往身體外 | **相反** |
+| J3 | 往身體轉 | 往身體外轉 | **相反** |
+| J4 | 肘往上 | 肘往上 | 相同 |
+| J5 | 往身體轉 | 往身體外轉 | **相反** |
+| J6 | 往身體外轉 | 往身體轉 | **相反** |
+| J7 | 往後 | 往前 | **相反** |
+
+> [!TIP]
+> **記憶技巧**：除了 J4（肘部）相同外，左右臂的正值方向大致呈**鏡像對稱**。
+
+---
+
+## 10. IMX219-83 立體相機使用說明
+
+### 10.1 硬體資訊
+- **型號**：IMX219-83 Stereo Camera
+- **解析度**：640×480（可調）
+- **幀率**：15 FPS（可調）
+- **連接**：CSI 介面連接至 Jetson
+
+### 10.2 啟動方式
+
+相機發佈節點已整合在  中，執行該腳本時會自動啟動：
+
+
+
+啟動順序：
+1.  - 設置 CAN 介面
+2.  - ROS-Unity 橋接（背景）
+3.  - 相機發佈（背景）
+4.  - 手臂控制（前景）
+
+### 10.3 單獨啟動相機
+
+若只需要相機功能，不需要手臂控制：
+
+
+
+### 10.4 ROS2 Topics
+
+| Topic | 類型 | 說明 |
+|-------|------|------|
+|  |  | 左眼壓縮影像 |
+|  |  | 右眼壓縮影像 |
+
+### 10.5 可調參數
+
+啟動時可透過  調整參數：
+
+
+
+| 參數 | 預設值 | 說明 |
+|------|--------|------|
+|  | 640 | 影像寬度 |
+|  | 480 | 影像高度 |
+|  | 15 | 幀率 |
+|  | 90 | JPEG 壓縮品質（1-100）， 中設為 50 以節省頻寬 |
+|  | true | 啟用左眼相機 |
+|  | true | 啟用右眼相機 |
+|  | false | 使用測試圖案（無實體相機時用於測試） |
+
+### 10.6 檢視影像
+
+在另一個終端檢視相機是否正常發佈：
+
+
+
+### 10.7 常見問題
+
+#### 問題：Failed to read camera frame
+
+**原因**：桌面環境未啟動。 GStreamer 插件需要 X11/Wayland 顯示伺服器。
+
+**解決方案**：
+
+
+> [!WARNING]
+> 如需使用相機功能，請勿關閉桌面環境 (gdm3)。詳見 [8.3 節](#83-治標操控手臂期間釋放資源) 的說明。
+
+#### 問題：相機畫面延遲或卡頓
+
+**可能原因**：
+1. 網路頻寬不足
+2. JPEG 品質設定過高
+
+**解決方案**：
+
+
+### 10.8 記憶體使用
+
+ 約佔用 **200 MB** 記憶體。若系統記憶體緊張，可考慮：
+- 只啟用單眼相機（）
+- 降低解析度和幀率
+
+---
+
+## 9. 獨立 Python 腳本控制導致的抖動問題
+
+### 9.1 問題現象
+嘗試繞過 ，直接使用獨立 Python 腳本調用  庫控制馬達時，會發生**嚴重的手臂抖動**，即使：
+- 記憶體充足（可用 > 3GB）
+- CAN  已設為 1000+
+- 無封包丟失（TX/RX dropped = 0）
+- 使用了與  相同的 Kp/Kd 參數
+
+### 9.2 根本原因
+經測試確認，獨立腳本缺少  的**完整控制架構**：
+
+| 項目 | unity_interface_follower (✅ 穩定) | 獨立 Python 腳本 (❌ 抖動) |
+|------|--------------------------------------|--------------------------|
+| **控制架構** | ROS2 節點 + 獨立線程 | 單一主線程 |
+| **控制循環** | **持續運行 500Hz** | 移動完就結束 |
+| **雙臂控制** | **同時控制 can1 + can2** | 通常只控制單臂 |
+| **命令發送** | 交替發送左右臂命令 | 只發單臂命令 |
+| **結束處理** | 持續保持位置 | 調用  |
+
+關鍵差異：
+1. **持續控制循環**：即使沒有新目標， 仍持續以 500Hz 發送命令保持位置穩定
+2. **雙臂同步控制**：CAN 總線上需要同時有雙臂的通訊才能穩定運作
+3. **獨立線程**：控制循環在獨立線程中運行，不受其他操作的延遲影響
+
+### 9.3 正確的控制方式
+**務必通過  + ROS2 topic 來控制手臂：**
+
+
+
+> [!CAUTION]
+> **不要嘗試用獨立腳本直接控制馬達**
+> 即使程式碼邏輯看似正確（有 rate limiting、正確的 Kp/Kd），缺少完整的 ROS2 控制架構仍會導致不穩定的抖動現象。若需要程式化控制，請透過發布 ROS2 topic 的方式與  互動。
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat
+已添加到 README_zh.md cat

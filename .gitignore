@@ -83,3 +83,9 @@ openclaw_src/
 openclaw/.env
 openclaw/venv/
 ## openclaw/logs/
+
+# SSH keys and config
+.ssh/
+
+# NPM cache
+.npm/
