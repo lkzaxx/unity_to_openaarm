@@ -16,6 +16,7 @@
 11. [監測手臂位置](#11-監測手臂位置)
 12. [夾爪控制](#12-夾爪控制)
 13. [關節正值方向參考](#13-關節正值方向參考)
+14. [特殊指令：回零 (Home) 與重新啟用 (Enable)](#14-特殊指令回零-home-與重新啟用-enable)
 
 ---
 
@@ -827,3 +828,109 @@ ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState "{name: ['R_J1',
 已添加到 README_zh.md cat
 已添加到 README_zh.md cat
 已添加到 README_zh.md cat
+
+---
+
+## 14. 特殊指令：回零 (Home) 與重新啟用 (Enable)
+
+### 14.1 功能說明
+
+透過 `/unity/joint_commands` topic 發送特殊指令名稱，可以讓手臂**平滑回到零位後自動 disable（斷電）**，或重新啟用已 disable 的手臂。
+
+### 14.2 可用指令
+
+| 指令名稱 | 說明 |
+|-----------|------|
+| `R_HOME` | 右手臂回零 → 到位後 disable |
+| `L_HOME` | 左手臂回零 → 到位後 disable |
+| `HOME` | 雙臂同時回零 → 到位後 disable |
+| `R_ENABLE` | 重新啟用已 disable 的右手臂 |
+| `L_ENABLE` | 重新啟用已 disable 的左手臂 |
+| `ENABLE` | 重新啟用雙臂 |
+
+### 14.3 使用方式
+
+```bash
+# 右手回零並 disable
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState \
+  "{name: ['R_HOME'], position: [0.0]}" --once
+
+# 雙臂同時回零
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState \
+  "{name: ['HOME'], position: [0.0]}" --once
+
+# 重新啟用右手
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState \
+  "{name: ['R_ENABLE'], position: [0.0]}" --once
+
+# 重新啟用雙臂
+ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState \
+  "{name: ['ENABLE'], position: [0.0]}" --once
+```
+
+### 14.4 運作流程
+
+1. **HOME 指令**：收到後將目標位置設為全零，控制迴圈會以 rate limiting 平滑移動
+2. **到位判定**：所有關節位置 < 0.05 rad 時視為到位
+3. **自動 Disable**：到位後自動呼叫 `disable_all()`，馬達斷電
+4. **ENABLE 指令**：重新呼叫 `enable_all()` 啟用馬達，恢復控制
+
+> [!NOTE]
+> Disable 狀態下，控制迴圈會跳過該手臂的 MIT 指令發送與接收，不會產生多餘的 CAN 流量。
+
+### 14.5 靈巧手特殊指令
+
+透過 `/unity/ehand_commands` topic 發送特殊指令，控制靈巧手回零、張開、握緊、禁用或重新啟用。
+
+#### 可用指令
+
+| 指令名稱 | 說明 |
+|-----------|------|
+| `R_HAND_HOME` | 右靈巧手回零 + 停止控制迴圈 |
+| `L_HAND_HOME` | 左靈巧手回零 + 停止控制迴圈 |
+| `HAND_HOME` | 雙手回零 + 停止控制迴圈 |
+| `R_HAND_OPEN` | 右靈巧手張開 |
+| `L_HAND_OPEN` | 左靈巧手張開 |
+| `HAND_OPEN` | 雙手張開 |
+| `R_HAND_CLOSE` | 右靈巧手握緊 |
+| `L_HAND_CLOSE` | 左靈巧手握緊 |
+| `HAND_CLOSE` | 雙手握緊 |
+| `R_HAND_DISABLE` | 右靈巧手禁用（釋放電機） |
+| `L_HAND_DISABLE` | 左靈巧手禁用（釋放電機） |
+| `HAND_DISABLE` | 雙手禁用 |
+| `R_HAND_ENABLE` | 重新啟用右靈巧手（發送回零恢復） |
+| `L_HAND_ENABLE` | 重新啟用左靈巧手 |
+| `HAND_ENABLE` | 重新啟用雙手 |
+
+#### 使用方式
+
+```bash
+# 右靈巧手回零 + 停止控制
+ros2 topic pub /unity/ehand_commands sensor_msgs/msg/JointState \
+  "{name: ['R_HAND_HOME'], position: [0.0]}" --once
+
+# 雙手張開
+ros2 topic pub /unity/ehand_commands sensor_msgs/msg/JointState \
+  "{name: ['HAND_OPEN'], position: [0.0]}" --once
+
+# 右靈巧手禁用（釋放電機）
+ros2 topic pub /unity/ehand_commands sensor_msgs/msg/JointState \
+  "{name: ['R_HAND_DISABLE'], position: [0.0]}" --once
+
+# 重新啟用雙手
+ros2 topic pub /unity/ehand_commands sensor_msgs/msg/JointState \
+  "{name: ['HAND_ENABLE'], position: [0.0]}" --once
+```
+
+#### 靈巧手 CAN FD 命令對照
+
+| 動作 | Byte1 | Byte2 | 說明 |
+|------|-------|-------|------|
+| 禁用 | 0xFD | 0x00 | 釋放電機 |
+| 位置控制 | 0xFD | 0x01 | 正常控制模式 |
+| 張開 | 0xFD | 0x02 | 全部手指張開 |
+| 握緊 | 0xFD | 0x03 | 全部手指握緊 |
+| 回零 | 0xFD | 0x04 | 回到零位 |
+
+> [!NOTE]
+> HOME 和 DISABLE 指令會停止控制迴圈對該手的位置命令發送。使用 ENABLE 指令可恢復控制。
