@@ -89,3 +89,9 @@ openclaw/venv/
 
 # NPM cache
 .npm/
+
+# Realsense
+realsense/hid-sensor-hub-build/
+
+# NVIDIA Compute Cache
+.nv/
