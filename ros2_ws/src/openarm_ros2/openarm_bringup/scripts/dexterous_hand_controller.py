@@ -132,6 +132,20 @@ class DexterousHandController:
             pos_value = max(0, min(255, pos_value))
             pos_values.append(pos_value)
         
+        # === DEBUG: 追蹤每次呼叫 ===
+        hand_name = "LEFT" if self.can_id == 0x12 else "RIGHT"
+        tp = self._state['target_pos']
+        if tp is not None:
+            tc = max(abs(pos_values[i] - tp[i]) for i in range(6))
+            ts = time.time() - self._state.get('last_send_time', 0)
+        else:
+            tc = -1
+            ts = -1
+        self._send_count = getattr(self, '_send_count', 0)
+        if self._send_count % 50 == 0:
+            print(f"[{hand_name}_DBG] call#{self._send_count} target_change={tc:.0f} time_since={ts:.2f} pos={pos_values[:3]}... disabled={getattr(self, '_disabled', False)}", flush=True)
+        self._send_count += 1
+        
         # === 防塞車機制：動態等待時間 ===
         MAX_TRAVEL_TIME = 1.5  # 全程移動時間（秒）
         MIN_INTERVAL = 0.1     # 最小發送間隔（秒）
@@ -143,10 +157,6 @@ class DexterousHandController:
             # 計算目標變化
             target_change = max(abs(pos_values[i] - self._state['target_pos'][i]) for i in range(6))
             
-            # 如果目標沒變，跳過
-            if target_change < CHANGE_THRESHOLD:
-                return False
-            
             # 計算上次動作的預估時間
             if self._state['last_pos'] is not None:
                 last_move = max(abs(self._state['target_pos'][i] - self._state['last_pos'][i]) for i in range(6))
@@ -154,8 +164,13 @@ class DexterousHandController:
             else:
                 estimated_time = MIN_INTERVAL
             
-            # 等待上次動作完成
-            if time_since_last < estimated_time:
+            # 如果目標沒變且動作尚未完成，跳過
+            if target_change < CHANGE_THRESHOLD and time_since_last < estimated_time:
+                return False
+            
+            # 如果目標沒變且動作已完成，設定最小重發間隔避免刷屏
+            RESEND_INTERVAL = 0.5  # 相同目標最快 0.5 秒重發一次
+            if target_change < CHANGE_THRESHOLD and time_since_last < RESEND_INTERVAL:
                 return False
         
         # === 更新狀態 ===

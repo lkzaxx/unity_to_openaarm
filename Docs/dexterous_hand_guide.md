@@ -464,7 +464,7 @@ python3 ~/openarm_can/setup/usbcanfd_scan.py -t demo
 | 項目 | 狀態 | 說明 |
 |------|------|------|
 | USB CANFD 發送 | ✅ 正常 | 可以發送命令 |
-| USB CANFD 接收 | ❌ 不工作 | 無法接收靈巧手回應（設備可能損壞） |
+| USB CANFD 接收 | ✅ 正常 | 2026-03-12 修正結構體順序後正常工作 |
 | 左手基本動作 | ✅ 正常 | 回零/張開/握緊 穩定 |
 | 右手基本動作 | ⚠️ 不穩定 | 有時正常，有時會卡住 |
 | 右手大拇指 | ❌ 故障 | 經常卡住，可能硬體問題 |
@@ -474,7 +474,7 @@ python3 ~/openarm_can/setup/usbcanfd_scan.py -t demo
 
 ### 發現的問題
 
-#### 問題 1: USB CANFD 接收功能不工作
+#### 問題 1: USB CANFD 接收功能不工作 (已修正 ✅)
 
 **症狀**: `usbcanfd_scan.py` 顯示「靈巧手無回應」
 
@@ -755,7 +755,7 @@ EOF
 |------|----------|
 | handle=NULL | **換 USB 接口** |
 | 手沒反應 | 1. 確認 24V 電源 2. 換 USB 接口 3. 重新上電 |
-| 「靈巧手無回應」 | 可忽略（接收功能不工作），直接操作 |
+| 「靈巧手無回應」 | 檢查結構體順序是否正確（frame 在前，timestamp 在後） |
 | 手指卡住 | 1. 重新上電 2. 避免使用位置模式 |
 | 右手不穩定 | 建議只用左手測試，右手可能有硬體問題 |
 | `usb_detach_kernel_driver_np error` | 可忽略，不影響功能 |
@@ -777,3 +777,65 @@ EOF
 - 驅動程式: `openarm_can/python/openarm/can/dexterous_hand.py`
 - 測試腳本: `openarm_can/setup/test_dexterous_hand.py`
 - USBCANFD 工具: `openarm_can/setup/usbcanfd_scan.py`
+
+---
+
+### 2026-03-12: 修正 USB CANFD 接收功能
+
+**問題**: `usbcanfd_scan.py` 的 `ZCAN_ReceiveFD_Data` 結構體順序錯誤
+
+**症狀**: 
+- `ZCAN_GetReceiveNum()` 返回 > 0，但數據解析錯誤
+- CAN ID 顯示異常值（如 `0xFD3104FE`）
+- 訊息長度顯示為 0
+
+**根本原因**:
+```python
+# 錯誤順序 (原本)
+class ZCAN_ReceiveFD_Data(Structure):
+    _fields_ = [
+        ("timestamp", c_uint64),
+        ("frame", ZCAN_CANFD_FRAME),  # 順序錯誤！
+    ]
+
+# 正確順序 (官方範例)
+class ZCAN_ReceiveFD_Data(Structure):
+    _fields_ = [
+        ("frame", ZCAN_CANFD_FRAME),  # frame 在前
+        ("timestamp", c_uint64),       # timestamp 在後
+    ]
+```
+
+**修正檔案**: `~/openarm_can/setup/usbcanfd_scan.py`
+
+**驗證**:
+```bash
+# 讀取右手狀態
+sudo python3 -c "
+import sys, time
+sys.path.insert(0, /home/idaka/openarm_can/setup)
+from usbcanfd_scan import ZLGCAN, MODE_NORMAL, TYPE_CANFD
+
+can = ZLGCAN()
+can.open_device()
+can.set_baudrate(0, 1000000, 5000000)
+can.init_channel(0, MODE_NORMAL)
+can.start_can()
+
+can.transmit_fd(0x11, bytes([0xFC] + [0x00] * 31))
+time.sleep(0.3)
+
+num = can.get_receive_num(TYPE_CANFD)
+if num > 0:
+    msgs = can.receive_fd(num, 100)
+    data = bytes([msgs[0].frame.data[i] for i in range(32)])
+    print(原始:,  .join({:02X}.format(b) for b in data[:16]))
+    if (data[0] & 0x03) == 2:
+        print(✅ 接收功能正常!)
+        for i, name in enumerate([拇指旋轉,拇指伸縮,食指,中指,無名指,小指]):
+            print(f {name}: {data[2+i*5+1]}/255)
+can.close()
+"
+```
+
+**參考**: `~/CANFD_Docs/二次开发样例源码/python(x64)_example_python3.8.8_v2.0/cxcanfd_x64_v2.0.py`

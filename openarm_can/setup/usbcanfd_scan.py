@@ -149,7 +149,7 @@ class ZCAN_CANFD_FRAME(Structure):
     ]
 
 
-class ZCAN_Receive_Data(Structure):
+class ZCAN_Receive_Data(Structure):  # 修正: frame 在前
     """標準 CAN 接收數據"""
     _fields_ = [
         ("timestamp", c_uint64),
@@ -158,10 +158,10 @@ class ZCAN_Receive_Data(Structure):
 
 
 class ZCAN_ReceiveFD_Data(Structure):
-    """CAN FD 接收數據"""
+    """CAN FD 接收數據 (修正: frame 在前, timestamp 在後)"""
     _fields_ = [
-        ("timestamp", c_uint64),
         ("frame", ZCAN_CANFD_FRAME),
+        ("timestamp", c_uint64),
     ]
 
 
