@@ -106,3 +106,115 @@ sudo ip link set can1 txqueuelen 1000
 sudo ip link set can2 txqueuelen 1000
 ```
 每次重開機後，都必須執行套用新的 `txqueuelen`，方能確保高頻控制不掉包。
+
+
+---
+
+## 8. 記憶系統 Embedding 設定
+
+### 問題背景
+OpenClaw 的記憶搜索使用 embedding（向量化）來做語義匹配。原本使用 OpenAI 的 embedding API，但因 OpenAI 額度用完（429 insufficient_quota），導致記憶搜索完全失敗。
+
+### 解決方案：改用 local embedding
+改用本地 embedding，由 Jetson Orin Nano Super 的 GPU 直接運算，免費且無額度限制。
+
+### 設定方式
+在  中加入：
+
+
+### 模型資訊
+| 項目 | 值 |
+|---|---|
+| 模型名稱 | EmbeddingGemma 300M (Google) |
+| 檔案 |  |
+| 大小 | 約 300MB |
+| 來源 |  (HuggingFace) |
+| 引擎 | node-llama-cpp |
+| 模型快取路徑 (容器內) |  |
+| 首次使用 | 自動下載，之後使用快取 |
+
+### 可用的 Embedding Provider
+| Provider | 環境變數 | 說明 |
+|---|---|---|
+| usage: openai [-h] [-v] [-b API_BASE] [-k API_KEY] [-p PROXY [PROXY ...]]
+              [-o ORGANIZATION] [-t {openai,azure}]
+              [--api-version API_VERSION] [--azure-endpoint AZURE_ENDPOINT]
+              [--azure-ad-token AZURE_AD_TOKEN] [-V]
+              {api,tools,migrate,grit} ...
+
+positional arguments:
+  {api,tools,migrate,grit}
+    api                 Direct API calls
+    tools               Client side tools for convenience
+
+options:
+  -h, --help            show this help message and exit
+  -v, --verbose         Set verbosity.
+  -b API_BASE, --api-base API_BASE
+                        What API base url to use.
+  -k API_KEY, --api-key API_KEY
+                        What API key to use.
+  -p PROXY [PROXY ...], --proxy PROXY [PROXY ...]
+                        What proxy to use.
+  -o ORGANIZATION, --organization ORGANIZATION
+                        Which organization to run as (will use your default
+                        organization if not specified)
+  -t {openai,azure}, --api-type {openai,azure}
+                        The backend API to call, must be `openai` or `azure`
+  --api-version API_VERSION
+                        The Azure API version, e.g.
+                        'https://learn.microsoft.com/en-us/azure/ai-
+                        services/openai/reference#rest-api-versioning'
+  --azure-endpoint AZURE_ENDPOINT
+                        The Azure endpoint, e.g.
+                        'https://endpoint.openai.azure.com'
+  --azure-ad-token AZURE_AD_TOKEN
+                        A token from Azure Active Directory,
+                        https://www.microsoft.com/en-
+                        us/security/business/identity-access/microsoft-entra-
+                        id
+  -V, --version         show program's version number and exit |  | 原本使用，額度用完 |
+|  |  | Anthropic 旗下，品質最佳 |
+|  |  | Google，有免費額度 |
+|  | 無需 | 需安裝 Ollama |
+|  | 無需 | 本地 GPU 運算，目前採用 |
+
+### 注意事項
+- 模型快取在容器內，容器重建後需重新下載（約 300MB）
+- 如需持久化，可將  掛載到宿主機
+
+
+---
+
+## 8. Memory Embedding Settings
+
+### Background
+OpenClaw memory search uses embedding for semantic matching.
+Originally used OpenAI embedding API, but quota exhausted (429 insufficient_quota),
+causing memory search to fail completely.
+
+### Solution: Local Embedding
+Use local embedding on Jetson Orin Nano Super GPU. Free, no quota limits.
+
+### Configuration
+In openclaw.json, add under agents.defaults:
+  memorySearch.provider = "local"
+
+### Model Info
+- Model: EmbeddingGemma 300M by Google
+- File: embeddinggemma-300m-qat-Q8_0.gguf, about 300MB
+- Source: HuggingFace ggml-org/embeddinggemma-300m-qat-q8_0-GGUF
+- Engine: node-llama-cpp
+- Cache path in container: /home/node/.node-llama-cpp/models/
+- First use: auto-downloads, then cached
+
+### Available Embedding Providers
+- openai: needs OPENAI_API_KEY, was used, quota exhausted
+- voyage: needs VOYAGE_API_KEY, Anthropic subsidiary, best quality
+- gemini: needs GEMINI_API_KEY, Google, has free tier
+- ollama: no key needed, requires Ollama installed
+- local: no key needed, local GPU compute, currently adopted
+
+### Notes
+- Model cache is inside container; rebuilt container requires re-download about 300MB
+- To persist, mount /home/node/.node-llama-cpp to host

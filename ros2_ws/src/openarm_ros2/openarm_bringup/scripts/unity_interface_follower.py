@@ -238,6 +238,14 @@ class UnityFollowerInterface(Node):
         self.last_unity_time = time.time()  # 初始化為當前時間，避免啟動時誤判
         self.unity_connected = False
         
+        # === Home 指令狀態 ===
+        self.left_homing = False   # 左臂正在回零
+        self.right_homing = False  # 右臂正在回零
+        self.left_disabled = False  # 左臂已 disable
+        self.right_disabled = False # 右臂已 disable
+        self.left_hand_disabled = False   # 左靈巧手已 disable
+        self.right_hand_disabled = False  # 右靈巧手已 disable
+        
         # === 狀態快取（用於 USE_STATE_CACHE 模式）===
         self.state_lock = threading.Lock()
         self.left_state = {
@@ -305,6 +313,17 @@ class UnityFollowerInterface(Node):
                     self.left_hand.send_home()
                     self.right_hand.send_home()
                     time.sleep(2.0)  # 等待回零完成
+                    
+                    # 探測靈巧手狀態
+                    for label, hand in [("Left", self.left_hand), ("Right", self.right_hand)]:
+                        status = hand.read_status()
+                        if status:
+                            fingers_str = ", ".join(
+                                f"{f['name']}={f['position']}" for f in status['fingers']
+                            )
+                            self.get_logger().info(f"   {label} hand status: {status['hand_state']} | {fingers_str}")
+                        else:
+                            self.get_logger().warn(f"   {label} hand: no response")
                 else:
                     self.get_logger().warn("⚠️ USB CANFD device not found (靈巧手功能停用)")
                     self.zlgcan = None
@@ -353,6 +372,9 @@ class UnityFollowerInterface(Node):
         # === 發布 JointState 給 Unity ===
         self.joint_state_pub = self.create_publisher(
             JointState, '/openarm/joint_states', 10
+        )
+        self.hand_state_pub = self.create_publisher(
+            JointState, '/openarm/hand_states', 10
         )
         
         # === Ruckig 初始化 ===
@@ -468,6 +490,11 @@ class UnityFollowerInterface(Node):
             # ===== [JOINT_LOGGER] Unity 連線時開始記錄 =====
             self._start_joint_logging()
         
+        # === 特殊指令處理 ===
+        if msg.name and msg.name[0] in ('HOME', 'L_HOME', 'R_HOME', 'L_ENABLE', 'R_ENABLE', 'ENABLE'):
+            self._handle_special_command(msg.name[0])
+            return
+        
         with self.target_lock:
             for i, name in enumerate(msg.name):
                 if name.startswith('L_J'):
@@ -484,6 +511,42 @@ class UnityFollowerInterface(Node):
                     self.left_gripper_target = self._gripper_to_motor(msg.position[i])
                 elif name == 'R_EE':
                     self.right_gripper_target = self._gripper_to_motor(msg.position[i])
+    
+    def _handle_special_command(self, cmd: str):
+        """處理特殊指令：HOME (回零+禁用) / ENABLE (重新啟用)"""
+        if cmd in ('HOME', 'L_HOME'):
+            self.get_logger().info("Left arm: homing...")
+            self.left_homing = True
+            with self.target_lock:
+                self.left_target = [0.0] * 7
+                self.left_gripper_target = 0.0
+        
+        if cmd in ('HOME', 'R_HOME'):
+            self.get_logger().info("Right arm: homing...")
+            self.right_homing = True
+            with self.target_lock:
+                self.right_target = [0.0] * 7
+                self.right_gripper_target = 0.0
+        
+        if cmd in ('ENABLE', 'L_ENABLE'):
+            if self.left_disabled:
+                self.get_logger().info("Left arm: re-enabling...")
+                self.left_arm.enable_all()
+                time.sleep(0.05)
+                self.left_arm.recv_all()
+                self.left_disabled = False
+                self.left_homing = False
+                self.get_logger().info("Left arm re-enabled")
+        
+        if cmd in ('ENABLE', 'R_ENABLE'):
+            if self.right_disabled:
+                self.get_logger().info("Right arm: re-enabling...")
+                self.right_arm.enable_all()
+                time.sleep(0.05)
+                self.right_arm.recv_all()
+                self.right_disabled = False
+                self.right_homing = False
+                self.get_logger().info("Right arm re-enabled")
     
     def heartbeat_callback(self, msg: String):
         """心跳回調"""
@@ -503,6 +566,16 @@ class UnityFollowerInterface(Node):
             self.unity_connected = True
             self.get_logger().info("✅ Unity ehand connected!")
             self._start_joint_logging()
+        
+        # === 靈巧手特殊指令處理 ===
+        if msg.name and msg.name[0] in ('L_HAND_HOME', 'R_HAND_HOME', 'HAND_HOME',
+                                         'L_HAND_OPEN', 'R_HAND_OPEN', 'HAND_OPEN',
+                                         'L_HAND_CLOSE', 'R_HAND_CLOSE', 'HAND_CLOSE',
+                                         'L_HAND_DISABLE', 'R_HAND_DISABLE', 'HAND_DISABLE',
+                                         'L_HAND_ENABLE', 'R_HAND_ENABLE', 'HAND_ENABLE',
+                                         'L_HAND_STATUS', 'R_HAND_STATUS', 'HAND_STATUS'):
+            self._handle_ehand_special_command(msg.name[0])
+            return
         
         with self.hand_target_lock:
             for i, name in enumerate(msg.name):
@@ -527,6 +600,174 @@ class UnityFollowerInterface(Node):
             l_str = str([round(x, 2) for x in self.left_hand_target])
             r_str = str([round(x, 2) for x in self.right_hand_target])
             self.get_logger().info(f"[ehand] L={l_str}, R={r_str}")
+    
+    def _handle_ehand_special_command(self, cmd: str):
+        """處理靈巧手特殊指令"""
+        # 判斷左/右/雙手
+        is_left = cmd.startswith('L_') or not cmd.startswith('R_')
+        is_right = cmd.startswith('R_') or not cmd.startswith('L_')
+        action = cmd.split('HAND_')[1]  # HOME / OPEN / CLOSE / DISABLE / ENABLE / STATUS
+        
+        # === STATUS: 讀取靈巧手狀態 ===
+        if action == 'STATUS':
+            for label, hand, do_it in [
+                ("Left", self.left_hand, is_left),
+                ("Right", self.right_hand, is_right)
+            ]:
+                if not do_it:
+                    continue
+                if hand and hand.is_ready():
+                    status = hand.read_status()
+                    if status:
+                        fingers_str = ", ".join(
+                            f"{f['name']}={f['position']}({f['position_percent']:.0f}%)" 
+                            for f in status['fingers']
+                        )
+                        self.get_logger().info(
+                            f"{label} hand: {status['hand_state']} | {fingers_str}"
+                        )
+                    else:
+                        self.get_logger().warn(f"{label} hand: no response")
+                else:
+                    self.get_logger().warn(f"{label} hand: not available")
+            # 發布到 /openarm/hand_states topic
+            self._publish_hand_status(is_left, is_right)
+            return
+        
+        # 構建 CAN FD 命令 (32 bytes)
+        CMD_MAP = {
+            'HOME':    bytes([0xFD, 0x04] + [0x00] * 30),
+            'OPEN':    bytes([0xFD, 0x02] + [0x00] * 30),
+            'CLOSE':   bytes([0xFD, 0x03] + [0x00] * 30),
+            'DISABLE': bytes([0xFD, 0x00] + [0x00] * 30),
+        }
+        
+        if action == 'ENABLE':
+            # 重新啟用：發送回零命令恢復
+            if is_left and self.left_hand_disabled:
+                if self.left_hand and self.left_hand.is_ready():
+                    self.left_hand.send_home()
+                    self.left_hand_disabled = False
+                    self.get_logger().info("Left hand: re-enabled (home)")
+            if is_right and self.right_hand_disabled:
+                if self.right_hand and self.right_hand.is_ready():
+                    self.right_hand.send_home()
+                    self.right_hand_disabled = False
+                    self.get_logger().info("Right hand: re-enabled (home)")
+            return
+        
+        if action == "STATUS":
+            # Read hand status (0xFC command)
+            import time
+            FINGER_NAMES = ["M1", "M2", "M3", "M4", "M5", "M6"]
+            cmd_read = bytes([0xFC] + [0x00] * 31)
+            
+            if is_right and self.zlgcan:
+                from usbcanfd_scan import TYPE_CANFD
+                # Clear receive buffer first
+                old_num = self.zlgcan.get_receive_num(TYPE_CANFD)
+                if old_num > 0:
+                    self.zlgcan.receive_fd(old_num, 100)
+                
+                time.sleep(0.1)
+                self.zlgcan.transmit_fd(DEXTEROUS_HAND_RIGHT_CAN_ID, cmd_read)
+                time.sleep(0.5)
+                
+                num = self.zlgcan.get_receive_num(TYPE_CANFD)
+                if num > 0:
+                    msgs = self.zlgcan.receive_fd(num, 100)
+                    for msg in msgs:
+                        data = bytes([msg.frame.data[i] for i in range(32)])
+                        if (data[0] & 0x03) == 2:
+                            positions = []
+                            for i in range(6):
+                                pos = data[2 + i*5 + 1]
+                                pct = pos / 255 * 100
+                                positions.append(f"{FINGER_NAMES[i]}={pos}({pct:.0f}%)")
+                            self.get_logger().info("右手: " + ", ".join(positions))
+                            break
+                    else:
+                        self.get_logger().warn("Right hand STATUS: no read response found")
+                else:
+                    self.get_logger().warn("Right hand STATUS: no response")
+            
+            if is_left and self.zlgcan:
+                from usbcanfd_scan import TYPE_CANFD
+                old_num = self.zlgcan.get_receive_num(TYPE_CANFD)
+                if old_num > 0:
+                    self.zlgcan.receive_fd(old_num, 100)
+                
+                time.sleep(0.1)
+                self.zlgcan.transmit_fd(DEXTEROUS_HAND_LEFT_CAN_ID, cmd_read)
+                time.sleep(0.5)
+                
+                num = self.zlgcan.get_receive_num(TYPE_CANFD)
+                if num > 0:
+                    msgs = self.zlgcan.receive_fd(num, 100)
+                    for msg in msgs:
+                        data = bytes([msg.frame.data[i] for i in range(32)])
+                        if (data[0] & 0x03) == 2:
+                            positions = []
+                            for i in range(6):
+                                pos = data[2 + i*5 + 1]
+                                pct = pos / 255 * 100
+                                positions.append(f"{FINGER_NAMES[i]}={pos}({pct:.0f}%)")
+                            self.get_logger().info("左手: " + ", ".join(positions))
+                            break
+                    else:
+                        self.get_logger().warn("Left hand STATUS: no read response found")
+                else:
+                    self.get_logger().warn("Left hand STATUS: no response")
+            return
+        
+        can_cmd = CMD_MAP.get(action)
+        if can_cmd is None:
+            return
+        
+        if is_left:
+            if self.left_hand and self.left_hand.is_ready():
+                self.zlgcan.transmit_fd(DEXTEROUS_HAND_LEFT_CAN_ID, can_cmd)
+                if action == 'DISABLE':
+                    self.left_hand_disabled = True
+                elif action == 'HOME':
+                    self.left_hand_disabled = True  # 回零後也 disable 控制迴圈
+                self.get_logger().info(f"Left hand: {action}")
+            else:
+                self.get_logger().warn("Left hand not available")
+        
+        if is_right:
+            if self.right_hand and self.right_hand.is_ready():
+                self.zlgcan.transmit_fd(DEXTEROUS_HAND_RIGHT_CAN_ID, can_cmd)
+                if action == 'DISABLE':
+                    self.right_hand_disabled = True
+                elif action == 'HOME':
+                    self.right_hand_disabled = True
+                self.get_logger().info(f"Right hand: {action}")
+            else:
+                self.get_logger().warn("Right hand not available")
+    
+    def _publish_hand_status(self, is_left: bool, is_right: bool):
+        """讀取靈巧手狀態並發布到 /openarm/hand_states"""
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        
+        for label, hand, do_it, prefix in [
+            ("left", self.left_hand, is_left, "L_F"),
+            ("right", self.right_hand, is_right, "R_F"),
+        ]:
+            if not do_it:
+                continue
+            if hand and hand.is_ready():
+                status = hand.read_status()
+                if status:
+                    for f in status['fingers']:
+                        msg.name.append(f"{prefix}{status['fingers'].index(f)+1}")
+                        msg.position.append(f['position'] / 255.0)  # 0~1 normalized
+                        msg.velocity.append(float(f['speed']))
+                        msg.effort.append(f['position_percent'])  # 0~100%
+        
+        if msg.name:
+            self.hand_state_pub.publish(msg)
     
     def _clamp_position(self, pos: float, joint_idx: int, limits: dict) -> float:
         """限制位置在安全範圍內"""
@@ -774,39 +1015,61 @@ class UnityFollowerInterface(Node):
             # 發送到馬達
             try:
                 # === 左手臂 ===
-                self.left_arm.get_arm().mit_control_all(left_arm_cmds)
+                if not self.left_disabled:
+                    self.left_arm.get_arm().mit_control_all(left_arm_cmds)
                 
                 # === 左手末端執行器（並存模式）===
                 # 夾爪：永遠控制（如果啟用）
-                if ENABLE_GRIPPER:
+                if ENABLE_GRIPPER and not self.left_disabled:
                     self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
                 
                 # 靈巧手：使用 DexterousHandController
-                if self.left_hand and self.left_hand.is_ready() and loop_count % hand_control_interval == 0:
+                if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled and loop_count % hand_control_interval == 0:
                     with self.hand_target_lock:
                         left_fingers = self.left_hand_target[:]
                     # 發送位置命令（防塞車機制已內建）
                     self.left_hand.send_positions(left_fingers)
                 
-                self.left_arm.recv_all(500)
+                if not self.left_disabled:
+                    self.left_arm.recv_all(500)
+                
+                # === 左臂回零檢查 ===
+                if self.left_homing and not self.left_disabled:
+                    lm = self.left_arm.get_arm().get_motors()
+                    if all(abs(m.get_position()) < 0.05 for m in lm):
+                        self.left_arm.disable_all()
+                        self.left_disabled = True
+                        self.left_homing = False
+                        self.get_logger().info("Left arm: home reached, disabled")
                 
                 # === 右手臂 ===
-                self.right_arm.get_arm().mit_control_all(right_arm_cmds)
+                if not self.right_disabled:
+                    self.right_arm.get_arm().mit_control_all(right_arm_cmds)
                 
                 # === 右手末端執行器（並存模式）===
                 # 夾爪：永遠控制（如果啟用）
-                if ENABLE_GRIPPER:
+                if ENABLE_GRIPPER and not self.right_disabled:
                     right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
                     self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
                 
                 # 靈巧手：使用 DexterousHandController
-                if self.right_hand and self.right_hand.is_ready() and loop_count % hand_control_interval == 0:
+                if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled and loop_count % hand_control_interval == 0:
                     with self.hand_target_lock:
                         right_fingers = self.right_hand_target[:]
                     # 發送位置命令（防塞車機制已內建）
                     self.right_hand.send_positions(right_fingers)
                 
-                self.right_arm.recv_all(500)
+                if not self.right_disabled:
+                    self.right_arm.recv_all(500)
+                
+                # === 右臂回零檢查 ===
+                if self.right_homing and not self.right_disabled:
+                    rm = self.right_arm.get_arm().get_motors()
+                    if all(abs(m.get_position()) < 0.05 for m in rm):
+                        self.right_arm.disable_all()
+                        self.right_disabled = True
+                        self.right_homing = False
+                        self.get_logger().info("Right arm: home reached, disabled")
                 
                 # ===== [JOINT_LOGGER] 記錄數據 - 開始 =====
                 if self.joint_logger is not None and self.joint_logger.is_recording:
