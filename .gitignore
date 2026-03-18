@@ -95,3 +95,4 @@ realsense/hid-sensor-hub-build/
 
 # NVIDIA Compute Cache
 .nv/
+yolov8n.pt
