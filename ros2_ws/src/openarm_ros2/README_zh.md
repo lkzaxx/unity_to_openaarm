@@ -104,6 +104,45 @@ cansend can1 012##1FD04000000000000000000000000000000000000000000000000000000000
 
 ## 4. 硬體通訊設定與掉包排解 (CAN Bus)
 
+### 4.0 PCAN-USB FD 序號綁定與 CAN 介面固定
+
+本系統使用兩個 **PEAK System PCAN-USB FD** 轉接器，透過 USB 連接 Jetson Orin Nano。由於 Linux 的 pcan 驅動以 USB 偵測順序分配 `can1` / `can2` 名稱，更換 USB 接口後名稱可能對調。為此，`cansetup.sh` 已內建序號辨識與自動交換邏輯，確保對應關係固定。
+
+**PCAN-USB FD 序號對應表：**
+
+| CAN 介面 | 手臂 | PCAN 序號 | 備註 |
+| :---: | :---: | :--- | :--- |
+| `can1` | **右臂** | `206F307B4153` | 7 軸達妙馬達 (ID 001~007) |
+| `can2` | **左臂** | `2048335F5052` | 7 軸達妙馬達 (ID 001~007) |
+
+**使用方式：**
+```bash
+# 初始化 CAN（自動偵測序號、交換名稱、設定 bitrate 與 txqueuelen）
+sudo ~/ros2_ws/scripts/cansetup.sh
+
+# 完整重置（USB 斷電重連 + 重新初始化）
+sudo ~/ros2_ws/scripts/can_reset.sh
+
+# 馬達連線測試（互動式選單，支援單顆 / 整臂 / 全部 ping）
+~/ros2_ws/scripts/can_ping.sh
+```
+
+**查看序號：**
+```bash
+# 列出目前 USB 上的 PCAN 裝置
+lsusb | grep -i peak
+
+# 查看各 PCAN 的序號
+for d in /sys/bus/usb/devices/*/serial; do
+  [ -f "$d" ] && s=$(cat "$d") && echo "$d : $s"
+done | grep -v 0000000
+```
+
+> [!NOTE]
+> `cansetup.sh` 透過比對 USB 裝置序號自動決定 `can1` / `can2` 的分配，不依賴 udev 規則（pcan 驅動會覆蓋 udev 命名）。因此不管 PCAN 插在哪個 USB port，只要執行 `cansetup.sh` 就能保證 can1 = 右臂、can2 = 左臂。
+
+---
+
 ### 4.1 CAN 介面預設佇列過短問題 (txqueuelen)
 **現象與症狀：**
 執行高頻率的 MIT 模式時，手臂出現**無法預測的劇烈抽搐、震盪**，且無法順利抵達目標位置。此現象在系統有其他背景程式 (如 OpenClaw, Docker, Nginx) 運行時特別容易發生。
