@@ -921,6 +921,11 @@ ros2 topic pub /unity/joint_commands sensor_msgs/msg/JointState \
 
 透過 `/unity/ehand_commands` topic 發送特殊指令，控制靈巧手回零、張開、握緊、禁用或重新啟用。
 
+
+> [!CAUTION]
+> **Topic 類型是 `sensor_msgs/msg/JointState`，不是 `std_msgs/msg/String`！**
+> 特殊指令放在 `name[0]` 欄位，`position` 留空陣列。若誤用 `std_msgs/msg/String` 發送，
+> `ros2 topic pub --once` 會因型別不匹配而**無限等待訂閱者**，造成整個控制程式卡死。
 #### 可用指令
 
 | 指令名稱 | 說明 |

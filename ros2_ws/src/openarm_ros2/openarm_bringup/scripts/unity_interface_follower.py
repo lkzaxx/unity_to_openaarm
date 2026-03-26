@@ -12,6 +12,7 @@ Unity Follower Interface - 500Hz MIT 控制
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 import openarm_can as oa
@@ -238,6 +239,10 @@ class UnityFollowerInterface(Node):
         self.last_unity_time = time.time()  # 初始化為當前時間，避免啟動時誤判
         self.unity_connected = False
         
+        # === 追蹤模式：Unity 未送指令前，用馬達即時位置當目標 ===
+        self.left_tracking_unity = False
+        self.right_tracking_unity = False
+        
         # === Home 指令狀態 ===
         self.left_homing = False   # 左臂正在回零
         self.right_homing = False  # 右臂正在回零
@@ -351,9 +356,17 @@ class UnityFollowerInterface(Node):
         self._read_initial_positions()
         
         # === ROS2 訂閱 ===
+        # Use VOLATILE durability to ignore cached/stale messages from DDS.
+        # Without this, restarting the follower would replay the last joint command,
+        # potentially causing J7 to jump to 0 before J4 is raised (ground collision!).
+        volatile_qos = QoSProfile(
+            depth=10,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE
+        )
         self.unity_sub = self.create_subscription(
             JointState, '/unity/joint_commands',
-            self.unity_callback, 10
+            self.unity_callback, volatile_qos
         )
         
         self.heartbeat_sub = self.create_subscription(
@@ -365,7 +378,7 @@ class UnityFollowerInterface(Node):
         if ENABLE_DEXTEROUS_HAND:
             self.ehand_sub = self.create_subscription(
                 JointState, '/unity/ehand_commands',
-                self.ehand_callback, 10
+                self.ehand_callback, volatile_qos
             )
             self.get_logger().info("✓ Subscribed to /unity/ehand_commands")
         
@@ -411,6 +424,7 @@ class UnityFollowerInterface(Node):
         self.state_timer = self.create_timer(0.02, self.publish_joint_states)
         
         self.get_logger().info("✅ Unity Follower Interface started!")
+        self.get_logger().info("⏳ Arms IDLE — waiting for first external command before sending MIT control")
         self.get_logger().info(f"   Control frequency: {CONTROL_FREQUENCY} Hz")
         self.get_logger().info(f"   Left arm: {LEFT_CAN_INTERFACE}, Right arm: {RIGHT_CAN_INTERFACE}")
         self.get_logger().info(f"   USE_STATE_CACHE: {USE_STATE_CACHE}")
@@ -498,11 +512,33 @@ class UnityFollowerInterface(Node):
         with self.target_lock:
             for i, name in enumerate(msg.name):
                 if name.startswith('L_J'):
+                    if not self.left_tracking_unity:
+                        # 首次收到左臂指令：用當前實際位置初始化所有目標，避免跳動
+                        self.left_tracking_unity = True
+                        try:
+                            for j, m in enumerate(self.left_arm.get_arm().get_motors()):
+                                actual = m.get_position()
+                                self.left_target[j] = actual
+                                self.left_smoothed[j] = actual
+                        except:
+                            pass
+                        self.get_logger().info("✅ Left arm: switched to Unity tracking")
                     joint_idx = int(name.split('_J')[1]) - 1
                     if 0 <= joint_idx < 7:
                         pos = self._clamp_position(msg.position[i], joint_idx, LEFT_POSITION_LIMITS)
                         self.left_target[joint_idx] = pos
                 elif name.startswith('R_J'):
+                    if not self.right_tracking_unity:
+                        # 首次收到右臂指令：用當前實際位置初始化所有目標，避免跳動
+                        self.right_tracking_unity = True
+                        try:
+                            for j, m in enumerate(self.right_arm.get_arm().get_motors()):
+                                actual = m.get_position()
+                                self.right_target[j] = actual
+                                self.right_smoothed[j] = actual
+                        except:
+                            pass
+                        self.get_logger().info("✅ Right arm: switched to Unity tracking")
                     joint_idx = int(name.split('_J')[1]) - 1
                     if 0 <= joint_idx < 7:
                         pos = self._clamp_position(msg.position[i], joint_idx, RIGHT_POSITION_LIMITS)
@@ -921,6 +957,8 @@ class UnityFollowerInterface(Node):
                 left_grip = self.left_gripper_target
                 right_grip = self.right_gripper_target
             
+
+            
             # === 目標平滑：根據模式選擇 ===
             if USE_RUCKIG_SMOOTHING and RUCKIG_AVAILABLE:
                 # Ruckig 模式：使用 jerk-limited 軌跡
@@ -1015,61 +1053,59 @@ class UnityFollowerInterface(Node):
             # 發送到馬達
             try:
                 # === 左手臂 ===
-                if not self.left_disabled:
+                if not self.left_disabled and self.left_tracking_unity:
                     self.left_arm.get_arm().mit_control_all(left_arm_cmds)
                 
-                # === 左手末端執行器（並存模式）===
-                # 夾爪：永遠控制（如果啟用）
-                if ENABLE_GRIPPER and not self.left_disabled:
-                    self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
-                
-                # 靈巧手：使用 DexterousHandController
-                if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled and loop_count % hand_control_interval == 0:
-                    with self.hand_target_lock:
-                        left_fingers = self.left_hand_target[:]
-                    # 發送位置命令（防塞車機制已內建）
-                    self.left_hand.send_positions(left_fingers)
-                
-                if not self.left_disabled:
+                    # === 左手末端執行器（並存模式）===
+                    # 夾爪：永遠控制（如果啟用）
+                    if ENABLE_GRIPPER:
+                        self.left_arm.get_gripper().mit_control_all(left_grip_cmds)
+                    
+                    # 靈巧手：使用 DexterousHandController
+                    if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled and loop_count % hand_control_interval == 0:
+                        with self.hand_target_lock:
+                            left_fingers = self.left_hand_target[:]
+                        # 發送位置命令（防塞車機制已內建）
+                        self.left_hand.send_positions(left_fingers)
+                    
                     self.left_arm.recv_all(500)
-                
-                # === 左臂回零檢查 ===
-                if self.left_homing and not self.left_disabled:
-                    lm = self.left_arm.get_arm().get_motors()
-                    if all(abs(m.get_position()) < 0.05 for m in lm):
-                        self.left_arm.disable_all()
-                        self.left_disabled = True
-                        self.left_homing = False
-                        self.get_logger().info("Left arm: home reached, disabled")
+                    
+                    # === 左臂回零檢查 ===
+                    if self.left_homing:
+                        lm = self.left_arm.get_arm().get_motors()
+                        if all(abs(m.get_position()) < 0.05 for m in lm):
+                            self.left_arm.disable_all()
+                            self.left_disabled = True
+                            self.left_homing = False
+                            self.get_logger().info("Left arm: home reached, disabled")
                 
                 # === 右手臂 ===
-                if not self.right_disabled:
+                if not self.right_disabled and self.right_tracking_unity:
                     self.right_arm.get_arm().mit_control_all(right_arm_cmds)
                 
-                # === 右手末端執行器（並存模式）===
-                # 夾爪：永遠控制（如果啟用）
-                if ENABLE_GRIPPER and not self.right_disabled:
-                    right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
-                    self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
-                
-                # 靈巧手：使用 DexterousHandController
-                if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled and loop_count % hand_control_interval == 0:
-                    with self.hand_target_lock:
-                        right_fingers = self.right_hand_target[:]
-                    # 發送位置命令（防塞車機制已內建）
-                    self.right_hand.send_positions(right_fingers)
-                
-                if not self.right_disabled:
+                    # === 右手末端執行器（並存模式）===
+                    # 夾爪：永遠控制（如果啟用）
+                    if ENABLE_GRIPPER:
+                        right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
+                        self.right_arm.get_gripper().mit_control_all(right_grip_cmds)
+                    
+                    # 靈巧手：使用 DexterousHandController
+                    if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled and loop_count % hand_control_interval == 0:
+                        with self.hand_target_lock:
+                            right_fingers = self.right_hand_target[:]
+                        # 發送位置命令（防塞車機制已內建）
+                        self.right_hand.send_positions(right_fingers)
+                    
                     self.right_arm.recv_all(500)
-                
-                # === 右臂回零檢查 ===
-                if self.right_homing and not self.right_disabled:
-                    rm = self.right_arm.get_arm().get_motors()
-                    if all(abs(m.get_position()) < 0.05 for m in rm):
-                        self.right_arm.disable_all()
-                        self.right_disabled = True
-                        self.right_homing = False
-                        self.get_logger().info("Right arm: home reached, disabled")
+                    
+                    # === 右臂回零檢查 ===
+                    if self.right_homing:
+                        rm = self.right_arm.get_arm().get_motors()
+                        if all(abs(m.get_position()) < 0.05 for m in rm):
+                            self.right_arm.disable_all()
+                            self.right_disabled = True
+                            self.right_homing = False
+                            self.get_logger().info("Right arm: home reached, disabled")
                 
                 # ===== [JOINT_LOGGER] 記錄數據 - 開始 =====
                 if self.joint_logger is not None and self.joint_logger.is_recording:
@@ -1240,7 +1276,7 @@ class UnityFollowerInterface(Node):
         # ===== [JOINT_LOGGER] 儲存數據並繪圖 - 結束 =====
         
         # 關閉靈巧手（並存模式：張開兩隻手）
-        if self.dexterous_hand_ready and self.zlgcan is not None:
+        if self.zlgcan is not None:
             try:
                 self.get_logger().info("Opening dexterous hands before shutdown...")
                 # 發送張開命令 (0xFD 0x02)
