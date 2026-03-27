@@ -58,7 +58,8 @@ OpenArm 單臂為 **7 自由度 (7-DOF)** 架構，全機共有 14 個達妙伺�
 3. 執行 CAN 介面啟動腳本，初始化通訊：
    ```bash
    cd ~/ros2_ws/scripts
-   ./cansetup.sh
+   ./cansetup.sh            # 一般初始化
+   ./cansetup.sh --reset    # 斷電後需 USB 重設時加 --reset（或 -r）
    ```
 
 ### 2.2 啟動 Follower 控制迴圈
@@ -84,62 +85,170 @@ cd ~/ros2_ws/src/openarm_ros2/openarm_bringup/scripts
 4. **位置剛度 (Kp)**：彈簧係數 (建議維持溫和的參數 `[30.0, 30.0, 20.0, 20.0, 5.0, 5.0, 5.0]`)。
 5. **速度阻尼 (Kd)**：阻尼係數 (與上對應為 `[2.75, 2.5, 0.7, 0.4, 0.7, 0.6, 0.5]`)。
 
+#### 3.1.1 MIT 控制封包 Byte 格式 (8 Bytes)
+
+**發送（主機 → 馬達）**：CAN ID = 馬達 ID（例如 `001`）
+
+5 個浮點參數透過 `float_to_uint` 編碼後壓入 8 bytes：
+
+| 參數 | 物理範圍 | 位元數 | 編碼公式 |
+| :--- | :--- | :---: | :--- |
+| Position | -π ~ +π rad | 16-bit | `(val - P_MIN) / (P_MAX - P_MIN) × 0xFFFF` |
+| Velocity | -30 ~ +30 rad/s | 12-bit | `(val - V_MIN) / (V_MAX - V_MIN) × 0xFFF` |
+| Kp | 0 ~ 500 | 12-bit | `val / KP_MAX × 0xFFF` |
+| Kd | 0 ~ 5 | 12-bit | `val / KD_MAX × 0xFFF` |
+| Torque | -18 ~ +18 Nm | 12-bit | `(val - T_MIN) / (T_MAX - T_MIN) × 0xFFF` |
+
+**Bit 排列**：
+```
+Byte:  [  0  ][  1  ][  2  ][  3  ][  4  ][  5  ][  6  ][  7  ]
+       pppppppp pppppppp vvvvvvvv vvvvkkkk kkkkkkkk dddddddddddd tttttttttttt
+       |── Position ──| |─ Vel ─| Kp | |── Kp ──| |── Kd ──| T | |── Torque─|
+       (16-bit)         (12-bit) (12-bit) (12-bit)   (12-bit)
+```
+
+**回傳（馬達 → 主機）**：CAN ID = 馬達 ID + `0x10`（例如 `001` → `011`），包含實際 Position、Velocity、Torque。
+
+#### 3.1.2 特殊指令封包
+
+特殊指令以 7 bytes `0xFF` 為固定前綴，最後 1 byte 區分功能：
+
+| 封包 | 指令 | 說明 |
+| :--- | :--- | :--- |
+| `FF FF FF FF FF FF FF FC` | **Enable** | 進入 MIT 控制模式，馬達回傳狀態 |
+| `FF FF FF FF FF FF FF FD` | **Disable** | 退出控制模式，馬達釋放力矩 |
+| `FF FF FF FF FF FF FF FE` | **Set Zero** | 將當前位置設為零點 |
+| `FF FF FF FF FF FF FF FB` | **Clear Error** | 清除故障碼 |
+
 ### 3.2 HITBOT 靈巧手 (CAN FD 特殊協議)
 靈巧手的架構有別於單顆馬達，它是透過一包 **32 Bytes 的 CAN FD 封包** 同時控制 6 個手指微型伺服器。
-* **封包總長**: 32 Bytes
-* **格式範例**: `[Byte 1] [Byte 2] [Motor 1 (5 Bytes)] [Motor 2 (5 Bytes)] ... [Motor 6 (5 Bytes)]`
-* **欄位解析**:
-  - `Byte 1`: 控制旗標（`0xFD` 代表全選寫入控制指令，`0xFC` 代表向靈巧手請求讀取狀態）。
-  - `Byte 2`: 控制模式（`0x01`=位置模式, `0x02`=全開, `0x03`=全握緊, `0x04`=初始化回零）。
-  - `Motor 1~6 (各 5 Bytes)`: 分別對應 [Position (0~255), Speed (0~255), Torque (0~255), Reserved, Reserved]。
 
-**發送範例（以回零為例）**：
-```bash
-# 0xFD 寫入，0x04 回零，後方 30 Bytes 參數全為 0x00
-cansend can1 012##1FD04000000000000000000000000000000000000000000000000000000000000
+#### 3.2.1 封包整體結構
 ```
-> **👉 [踩雷注意] Reserved 必須補 0x00**: 先前測試中，每顆馬達結尾的 2 bytes `Reserved` 若填入 `0xFF` 會導致靈巧手某些手指動作不完全，**務必老實填入 `0x00`。**
+[Byte1][Byte2][Motor1: 5B][Motor2: 5B][Motor3: 5B][Motor4: 5B][Motor5: 5B][Motor6: 5B]
+  1B  +  1B  +    5B    +    5B    +    5B    +    5B    +    5B    +    5B   = 32 bytes
+```
+
+#### 3.2.2 Byte1：馬達選擇 + 讀寫命令
+
+高 6 位選擇馬達（Motor1~6），低 2 位為操作命令（`01`=寫入, `10`=讀出）。
+
+| 值 | 意義 | 值 | 意義 |
+|----|------|----|------|
+| `0xFD` | **全選寫入** | `0xFE` / `0xFC` | 全選讀出 |
+| `0x05` | 拇指旋轉 (M1) 寫入 | `0x09` | 拇指伸縮 (M2) 寫入 |
+| `0x11` | 食指 (M3) 寫入 | `0x21` | 中指 (M4) 寫入 |
+| `0x41` | 無名指 (M5) 寫入 | `0x81` | 尾指 (M6) 寫入 |
+| `0x19` | 拇指伸縮+食指 寫入 | | |
+
+#### 3.2.3 Byte2：控制模式
+
+高 4 位為點位編號（0~15，通常填 0），低 4 位為控制模式：
+
+| 值 | 模式 |
+|----|------|
+| `0x01` | 位置模式（正常控制）|
+| `0x02` | 伸展（全開）|
+| `0x03` | 收緊（全握）|
+| `0x04` | 初始化回零 |
+
+#### 3.2.4 Byte3~32：馬達參數（每顆 5 bytes × 6）
+
+| Offset | 內容 | 範圍 |
+|--------|------|------|
+| +0 | Position | 0~255 |
+| +1 | Speed | 0~255 |
+| +2 | Torque | 0~255 |
+| +3 | 保留 | **必須 0x00** |
+| +4 | 保留 | **必須 0x00** |
+
+#### 3.2.5 馬達對應表
+
+| 索引 | Motor | 功能 |
+|------|-------|------|
+| 0 | Motor1 | 拇指旋轉 |
+| 1 | Motor2 | 拇指伸縮 |
+| 2 | Motor3 | 食指 |
+| 3 | Motor4 | 中指 |
+| 4 | Motor5 | 無名指 |
+| 5 | Motor6 | 尾指 |
+
+#### 3.2.6 CAN ID 與通訊參數
+
+| 參數 | 值 |
+|------|-----|
+| 通訊類型 | CAN FD（非 classical CAN）|
+| 仲裁波特率 | 1 Mbps |
+| 數據波特率 | 5 Mbps |
+| 終端電阻 | 120Ω |
+| 右手 CAN ID | `0x11` |
+| 左手 CAN ID | `0x12` |
+
+**發送範例**：
+```bash
+# 回零（0xFD 全選寫入，0x04 回零，後方 30 Bytes 參數全為 0x00）
+cansend can1 012##1FD04000000000000000000000000000000000000000000000000000000000000
+
+# 全開
+cansend can1 012##1FD02FFFFFF0000FFFFFF0000FFFFFF0000FFFFFF0000FFFFFF0000FFFFFF0000
+
+# 全握
+cansend can1 012##1FD03FFFFFF0000FFFFFF0000FFFFFF0000FFFFFF0000FFFFFF0000FFFFFF0000
+```
+
+> [!CAUTION]
+> **Reserved 必須補 0x00**：先前測試中，每顆馬達結尾的 2 bytes `Reserved` 若填入 `0xFF` 會導致靈巧手某些手指動作不完全，**務必老實填入 `0x00`。**
 
 ---
 
 ## 4. 硬體通訊設定與掉包排解 (CAN Bus)
 
-### 4.0 PCAN-USB FD 序號綁定與 CAN 介面固定
+### 4.0 PCAN-USB FD 序號綁定與 CAN 介面對應
 
-本系統使用兩個 **PEAK System PCAN-USB FD** 轉接器，透過 USB 連接 Jetson Orin Nano。由於 Linux 的 pcan 驅動以 USB 偵測順序分配 `can1` / `can2` 名稱，更換 USB 接口後名稱可能對調。為此，`cansetup.sh` 已內建序號辨識與自動交換邏輯，確保對應關係固定。
+本系統使用兩個 **PEAK System PCAN-USB FD** 轉接器，透過 USB 連接 Jetson Orin Nano。由於 pcan 驅動以 USB 偵測順序分配 `can1` / `can2` 名稱（且無法透過 udev 或 `ip link set name` 覆寫），更換 USB 接口後 `can1` / `can2` 可能對調。
+
+`cansetup.sh` 透過 sysfs 讀取 PCAN 序號與 USB path 排序，自動產生 **arm mapping 檔** (`/tmp/can_arm_map`)，所有腳本讀取此檔即可正確對應左右臂。
 
 **PCAN-USB FD 序號對應表：**
 
-| CAN 介面 | 手臂 | PCAN 序號 | 備註 |
-| :---: | :---: | :--- | :--- |
-| `can1` | **右臂** | `206F307B4153` | 7 軸達妙馬達 (ID 001~007) |
-| `can2` | **左臂** | `2048335F5052` | 7 軸達妙馬達 (ID 001~007) |
+| PCAN 序號 | 手臂 | 備註 |
+| :--- | :---: | :--- |
+| `206F307B4153` (4153) | **右臂** | 7 軸達妙馬達 (ID 001~007) |
+| `2048335F5052` (5052) | **左臂** | 7 軸達妙馬達 (ID 001~007) |
+
+> [!IMPORTANT]
+> `can1` / `can2` 的分配**取決於 USB 插入的 port**，不是固定的。正確的左右臂對應請以 `/tmp/can_arm_map` 為準。
 
 **使用方式：**
 ```bash
-# 初始化 CAN（自動偵測序號、交換名稱、設定 bitrate 與 txqueuelen）
-sudo ~/ros2_ws/scripts/cansetup.sh
+# 一般初始化（快速，自動提升 sudo）
+./cansetup.sh
 
-# 完整重置（USB 斷電重連 + 重新初始化）
-sudo ~/ros2_ws/scripts/can_reset.sh
+# USB 重設 + 初始化（斷電後或 PCAN 偵測不到時使用）
+./cansetup.sh --reset    # 或 -r
 
-# 馬達連線測試（互動式選單，支援單顆 / 整臂 / 全部 ping）
-~/ros2_ws/scripts/can_ping.sh
+# 馬達連線測試（互動式選單，自動讀取 arm mapping）
+./can_ping.sh
 ```
+
+**Mapping 檔格式** (`/tmp/can_arm_map`)：
+```bash
+RIGHT_CAN=can1
+LEFT_CAN=can2
+```
+其他腳本或程式可 `source /tmp/can_arm_map` 取得 `$RIGHT_CAN` / `$LEFT_CAN` 變數。
 
 **查看序號：**
 ```bash
-# 列出目前 USB 上的 PCAN 裝置
 lsusb | grep -i peak
 
-# 查看各 PCAN 的序號
 for d in /sys/bus/usb/devices/*/serial; do
   [ -f "$d" ] && s=$(cat "$d") && echo "$d : $s"
 done | grep -v 0000000
 ```
 
 > [!NOTE]
-> `cansetup.sh` 透過比對 USB 裝置序號自動決定 `can1` / `can2` 的分配，不依賴 udev 規則（pcan 驅動會覆蓋 udev 命名）。因此不管 PCAN 插在哪個 USB port，只要執行 `cansetup.sh` 就能保證 can1 = 右臂、can2 = 左臂。
+> **為何不直接改 CAN 介面名稱？** pcan 驅動在每次 `ip link set up` 時都會重新註冊介面，覆蓋 `ip link set name` 或 udev 規則的改名。因此採用 mapping 檔方案，不改名但透過變數正確對應。
 
 ---
 
@@ -350,7 +459,7 @@ sudo chrt -f -p 50 <PID>
 
 1. 設置 CAN
    cd ~/ros2_ws/scripts
-   ./cansetup.sh
+   ./cansetup.sh            # 或 ./cansetup.sh --reset（斷電後）
 
 2. 啟動 Follower Interface
    ./start_follower.sh
