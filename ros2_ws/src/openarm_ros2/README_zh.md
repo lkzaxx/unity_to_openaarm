@@ -527,10 +527,10 @@ cd ~/ros2_ws/scripts
 ```
 
 啟動順序：
-1. `cansetup.sh` - 設置 CAN 介面
+1. `cansetup.sh` - 設置 CAN 介面，產生 `/tmp/can_arm_map`
 2. `ros_tcp_endpoint` - ROS-Unity 橋接（背景）
 3. `camera_publisher.py` - 相機發佈（背景）
-4. `unity_interface_follower.py` - 手臂控制（前景）
+4. `unity_interface_follower.py` - 手臂控制（前景，自動讀取 `/tmp/can_arm_map` 對應左右臂）
 
 ### 10.3 單獨啟動相機
 
