@@ -57,9 +57,21 @@ else:
 # 硬體配置
 # ============================================================================
 
-# CAN 介面
-LEFT_CAN_INTERFACE = "can2"
-RIGHT_CAN_INTERFACE = "can1"
+# CAN 介面：從 cansetup.sh 產生的 /tmp/can_arm_map 讀取
+def _read_can_map():
+    mapping = {}
+    try:
+        with open("/tmp/can_arm_map") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    mapping[k] = v
+    except FileNotFoundError:
+        pass
+    return mapping.get("LEFT_CAN", "can2"), mapping.get("RIGHT_CAN", "can1")
+
+LEFT_CAN_INTERFACE, RIGHT_CAN_INTERFACE = _read_can_map()
 
 # 馬達類型（V10 配置）
 MOTOR_TYPES = [
