@@ -28,19 +28,28 @@ if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
     done
 
     echo ""
-    echo "=== Resetting USB PCAN devices ==="
+    echo "=== Resetting USB hub (PCAN devices) ==="
+    # Find the parent USB hub that contains PCAN devices and reset it
     for dev in /sys/bus/usb/devices/*/idVendor; do
         dir=$(dirname "$dev")
         vendor=$(cat "$dir/idVendor" 2>/dev/null)
         product=$(cat "$dir/idProduct" 2>/dev/null)
         if [ "$vendor" = "0c72" ] && [ "$product" = "0012" ]; then
-            serial=$(cat "$dir/serial" 2>/dev/null)
-            echo "  Resetting PCAN $serial at $dir"
-            echo 0 > "$dir/authorized"
-            sleep 0.5
-            echo 1 > "$dir/authorized"
+            # Get parent hub path (e.g., 1-1 from 1-1.1)
+            hub=$(basename "$dir" | sed 's/\.[0-9]*$//')
+            break
         fi
     done
+    if [ -n "$hub" ] && [ -f "/sys/bus/usb/devices/$hub/authorized" ]; then
+        echo "  Resetting hub $hub ..."
+        echo 0 > "/sys/bus/usb/devices/$hub/authorized"
+        sleep 2
+        echo 1 > "/sys/bus/usb/devices/$hub/authorized"
+        sleep 3
+        echo "  Hub reset done"
+    else
+        echo "  No PCAN hub found, try physical replug"
+    fi
     sleep 3
     echo ""
 fi
