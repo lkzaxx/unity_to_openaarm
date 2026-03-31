@@ -16,8 +16,8 @@ if [ "$(id -u)" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-RIGHT_SERIAL="206F307B4153"
-LEFT_SERIAL="2048335F5052"
+RIGHT_SERIAL="2048335F5052"
+LEFT_SERIAL="206F307B4153"
 
 # --reset: USB reset PCAN devices first
 if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
