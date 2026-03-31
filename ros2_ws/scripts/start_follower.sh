@@ -73,6 +73,8 @@ if [ "$CAN_OK" = false ]; then
 fi
 
 # 2. 讀取目前馬達位置 + 健康檢查
+#    暫時關閉 set -e，因為 candump/kill/wait 可能回傳非零
+set +e
 echo ""
 echo "[Step 2] Reading current motor positions..."
 
@@ -92,7 +94,7 @@ MISSING_LIST=""
 for SIDE in RIGHT LEFT; do
     if [ "$SIDE" = "RIGHT" ]; then BUS=$RIGHT_CAN; else BUS=$LEFT_CAN; fi
 
-    # candump：只聽 recv_id (0x11~0x17)，過濾掉 echo
+    # candump：只聽 recv_id (0x11~0x17)，過濾掉 echo（-n 7 收滿自動退出）
     TMPFILE=$(mktemp /tmp/can_read_XXXXXX.txt)
     candump "$BUS",011:7FF,012:7FF,013:7FF,014:7FF,015:7FF,016:7FF,017:7FF -t a -n 7 > "$TMPFILE" 2>&1 &
     DUMP_PID=$!
@@ -100,7 +102,7 @@ for SIDE in RIGHT LEFT; do
 
     # 發送 enable (0xFC) 讀取狀態
     for sid in "${SEND_IDS[@]}"; do
-        cansend "$BUS" "${sid}#FFFFFFFFFFFFFFFC"
+        cansend "$BUS" "${sid}#FFFFFFFFFFFFFFFC" 2>/dev/null
         sleep 0.01
     done
 
@@ -110,8 +112,8 @@ for SIDE in RIGHT LEFT; do
         [ "$COUNT" -ge 7 ] && break
         sleep 0.1
     done
-    kill $DUMP_PID 2>/dev/null
-    wait $DUMP_PID 2>/dev/null
+    kill $DUMP_PID 2>/dev/null || true
+    wait $DUMP_PID 2>/dev/null || true
 
     # 檢查每顆馬達是否回傳
     for idx in 0 1 2 3 4 5 6; do
@@ -156,6 +158,9 @@ else
 fi
 
 echo "Saved to $INIT_FILE"
+
+# 恢復 set -e
+set -e
 
 # 3. Source ROS2
 echo ""
