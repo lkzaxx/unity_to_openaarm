@@ -71,6 +71,19 @@ esac
 
 echo ">> $CMD $SIDE → $MSG"
 
+# grip 指令需要先確保 ENABLE（DISABLE 後位置指令會被忽略）
+if [ "$CMD" = "grip" ] || [ "$CMD" = "GRIP" ]; then
+    if [ "$PREFIX" = "BOTH" ]; then EN_NAME="HAND_ENABLE"
+    else EN_NAME="${PREFIX}_HAND_ENABLE"; fi
+    EN_MSG="{name: ['$EN_NAME'], position: [0]}"
+    echo ">> auto-enable: $EN_NAME"
+    ros2 topic pub -r 10 "$TOPIC" sensor_msgs/msg/JointState "$EN_MSG" &
+    EN_PID=$!
+    sleep 0.5
+    kill $EN_PID 2>/dev/null
+    wait $EN_PID 2>/dev/null
+fi
+
 # 發送：10Hz 持續 DURATION 秒後自動停止
 ros2 topic pub -r 10 "$TOPIC" sensor_msgs/msg/JointState "$MSG" &
 PUB_PID=$!
