@@ -389,10 +389,12 @@ class UnityFollowerInterface(Node):
         )
         
         # === 訂閱靈巧手命令（並存模式：總是訂閱，等待命令）===
+        # 使用預設 QoS (depth=10) 讓 ros2 topic pub --once 也能送達
+        # joint_commands 保持 VOLATILE 避免重啟時 replay 舊的手臂指令（安全考量）
         if ENABLE_DEXTEROUS_HAND:
             self.ehand_sub = self.create_subscription(
                 JointState, '/unity/ehand_commands',
-                self.ehand_callback, volatile_qos
+                self.ehand_callback, 10
             )
             self.get_logger().info("✓ Subscribed to /unity/ehand_commands")
         
