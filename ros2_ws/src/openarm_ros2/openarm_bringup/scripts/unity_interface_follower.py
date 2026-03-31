@@ -380,7 +380,27 @@ class UnityFollowerInterface(Node):
         # [原始] self._read_initial_positions()  # refresh_all 在未 enable 時部分馬達讀不到
         # [改用] 從 start_follower.sh Step 2 寫入的暫存檔讀取（用 0xFC enable 指令取得的真實角度）
         self._load_initial_positions_from_file("/tmp/initial_joint_positions")
-        
+
+        # 比較 Step 2 角度和 enable 後的實際角度，檢測偏差
+        self.left_arm.refresh_all()
+        self.right_arm.refresh_all()
+        self.left_arm.recv_all()
+        self.right_arm.recv_all()
+        for label, arm, target in [
+            ("Left", self.left_arm, self.left_target),
+            ("Right", self.right_arm, self.right_target)
+        ]:
+            actual = [m.get_position() for m in arm.get_arm().get_motors()]
+            diffs = [abs(target[i] - actual[i]) for i in range(7)]
+            max_diff = max(diffs)
+            if max_diff > 0.1:
+                self.get_logger().warn(
+                    f"⚠️ {label} arm: Step2 vs actual max diff = {max_diff:.3f} rad ({max_diff*57.3:.1f}°) "
+                    f"diffs={[f'{d:.3f}' for d in diffs]}"
+                )
+            else:
+                self.get_logger().info(f"✅ {label} arm: Step2 vs actual max diff = {max_diff:.3f} rad — OK")
+
         # === ROS2 訂閱 ===
         # Use VOLATILE durability to ignore cached/stale messages from DDS.
         # Without this, restarting the follower would replay the last joint command,
