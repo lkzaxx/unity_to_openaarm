@@ -114,6 +114,66 @@ LEFT 6 -1.2228
 
 在啟動流程中，reset 發生在 Step 1（所有服務尚未啟動），其他 USB 裝置斷線不影響。
 
+## KP / KD 參數調整指南
+
+### 目前設定
+
+| 關節 | 馬達型號 | KP | KD | KP/KD 比值 |
+|------|---------|-----|-----|-----------|
+| J1 | DM8009 | 100.0 | 5.0 | 20 |
+| J2 | DM8009 | 80.0 | 4.5 | 17.8 |
+| J3 | DM4340 | 40.0 | 1.2 | 33.3 |
+| J4 | DM4340 | 60.0 | 1.5 | 40 |
+| J5 | DM4310 | 30.0 | 1.0 | 30 |
+| J6 | DM4310 | 30.0 | 1.0 | 30 |
+| J7 | DM4310 | 50.0 | 1.2 | 41.7 |
+| Gripper | DM4310 | 5.0 | 0.1 | 50 |
+
+### MIT 協議限制
+
+| 參數 | 範圍 | 解析度 |
+|------|------|--------|
+| KP | 0 ~ 500 | 12-bit (4096 級) |
+| KD | 0 ~ **5** | 12-bit (4096 級) |
+
+### KP/KD 比值與行為
+
+| KP/KD 比值 | 行為 | 適用場景 |
+|------------|------|---------|
+| > 30 | 欠阻尼，震盪多 | — |
+| 10 ~ 25 | 快速到位，輕微過衝 | VR 遙操（跟手） |
+| 5 ~ 15 | 平穩到位，不會晃 | 精細操作（抓取） |
+| 3 ~ 8 | 非常柔順 | 示教/記錄 |
+
+### DM4310 小馬達 KD 上限警告
+
+**DM4310（J5/J6/J7）的 KD 不可超過 ~1.5，否則會高頻震盪。**
+
+實測結果：
+- KD = 1.0~1.2：穩定 ✅
+- KD = 3.0：高頻震盪（速度達 2~3 rad/s）❌
+- KD = 5.0：嚴重震盪 ❌
+
+原因：KD 是速度回饋增益，DM4310 小馬達的速度量測雜訊較大，
+KD 過高會放大雜訊形成正回饋 → 高頻震盪。
+
+DM8009/DM4340 大馬達不受此限制，KD = 4.5~5.0 仍穩定。
+
+### 功能開關一覽
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| `ENABLE_JOINT_LOGGING` | True | 關節數據記錄（pkl 檔） |
+| `AUTO_PLOT_ON_SHUTDOWN` | False | 關閉時自動繪製比較圖 |
+| `ENABLE_GRIPPER` | True | 啟用夾爪（DM4310）控制 |
+| `ENABLE_DEXTEROUS_HAND` | True | 啟用靈巧手 ZLGCAN 初始化 |
+| `ENABLE_EHAND_SUBSCRIPTION` | False | 訂閱 /unity/ehand_commands |
+| `USE_DYNAMIC_KP_KD` | False | 動態 Kp/Kd（根據誤差調整） |
+| `USE_STATE_CACHE` | **True** | 狀態快取（**必須 True**，避免 CAN race） |
+| `USE_DEADLINE_TIMING` | False | Deadline 時序模式 |
+| `USE_RUCKIG_SMOOTHING` | False | Ruckig 軌跡平滑 |
+| `SYNC_GRIPPER_TO_EHAND` | True | [TEMP] 夾爪連動靈巧手 |
+
 ## 修改的檔案
 
 1. `start_follower.sh` — 加入 Step 0（清理）、Step 1 CAN 設置（失敗時 fallback --reset）、新增 Step 2（讀角度+健康檢查）
