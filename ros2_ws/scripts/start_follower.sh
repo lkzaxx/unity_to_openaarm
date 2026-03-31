@@ -42,27 +42,35 @@ fi
 
 # 1. 設置 CAN
 echo ""
-echo "Setting up CAN interfaces..."
-"$SCRIPT_DIR/cansetup.sh" --reset
+echo "[Step 1] Setting up CAN interfaces..."
+"$SCRIPT_DIR/cansetup.sh"
 
 # 讀取 CAN mapping
 source /tmp/can_arm_map 2>/dev/null || { RIGHT_CAN=can1; LEFT_CAN=can2; }
 
-# 等待 CAN 介面就緒
-echo ""
-echo "Waiting for CAN interfaces to be ready..."
-for attempt in $(seq 1 10); do
+# 驗證 CAN 介面就緒
+CAN_OK=false
+if ip link show "$RIGHT_CAN" 2>/dev/null | grep -q "UP" && \
+   ip link show "$LEFT_CAN" 2>/dev/null | grep -q "UP"; then
+    echo "  ✅ $RIGHT_CAN and $LEFT_CAN are UP"
+    CAN_OK=true
+fi
+
+# 如果 CAN 沒起來，嘗試 --reset 重來
+if [ "$CAN_OK" = false ]; then
+    echo "  ⚠️ CAN interfaces not ready, trying USB hub reset..."
+    "$SCRIPT_DIR/cansetup.sh" --reset
+    source /tmp/can_arm_map 2>/dev/null || { RIGHT_CAN=can1; LEFT_CAN=can2; }
+    sleep 1
     if ip link show "$RIGHT_CAN" 2>/dev/null | grep -q "UP" && \
        ip link show "$LEFT_CAN" 2>/dev/null | grep -q "UP"; then
-        echo "  ✅ $RIGHT_CAN and $LEFT_CAN are UP"
-        break
-    fi
-    if [ "$attempt" -eq 10 ]; then
-        echo "  ❌ CAN interfaces not ready after 5s, aborting."
+        echo "  ✅ $RIGHT_CAN and $LEFT_CAN are UP (after reset)"
+    else
+        echo "  ❌ CAN interfaces still not ready after reset."
+        echo "     Please check PCAN USB connections and try again."
         exit 1
     fi
-    sleep 0.5
-done
+fi
 
 # 2. 讀取目前馬達位置 + 健康檢查
 echo ""
