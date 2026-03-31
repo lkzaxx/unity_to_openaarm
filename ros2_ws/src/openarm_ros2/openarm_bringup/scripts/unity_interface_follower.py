@@ -262,6 +262,11 @@ class UnityFollowerInterface(Node):
         self.right_disabled = False # 右臂已 disable
         self.left_hand_disabled = False   # 左靈巧手已 disable
         self.right_hand_disabled = False  # 右靈巧手已 disable
+
+        # === 靈巧手握合狀態追蹤（用於 disable→home→grip 流程）===
+        self.left_hand_gripping = False   # 左手正在握
+        self.right_hand_gripping = False  # 右手正在握
+        self._hand_transition_threshold = 0.5  # 超過此值視為「握」
         
         # === 狀態快取（用於 USE_STATE_CACHE 模式）===
         self.state_lock = threading.Lock()
@@ -681,30 +686,99 @@ class UnityFollowerInterface(Node):
             self._handle_ehand_special_command(msg.name[0])
             return
         
+        # 解析新的手指目標
+        new_left = list(self.left_hand_target)
+        new_right = list(self.right_hand_target)
+        has_left = False
+        has_right = False
+
+        for i, name in enumerate(msg.name):
+            if name.startswith('L_F'):
+                finger_idx = int(name.split('_F')[1]) - 1
+                if 0 <= finger_idx < 6:
+                    new_left[finger_idx] = max(0.0, min(1.0, msg.position[i]))
+                    has_left = True
+            elif name.startswith('R_F'):
+                finger_idx = int(name.split('_F')[1]) - 1
+                if 0 <= finger_idx < 6:
+                    new_right[finger_idx] = max(0.0, min(1.0, msg.position[i]))
+                    has_right = True
+
+        # 檢查握合狀態變化，執行 disable→home→等待→enable 流程
+        if has_left:
+            avg_left = sum(new_left) / 6.0
+            want_grip = avg_left >= self._hand_transition_threshold
+            if want_grip != self.left_hand_gripping:
+                self._ehand_transition("left", want_grip)
+                self.left_hand_gripping = want_grip
+
+        if has_right:
+            avg_right = sum(new_right) / 6.0
+            want_grip = avg_right >= self._hand_transition_threshold
+            if want_grip != self.right_hand_gripping:
+                self._ehand_transition("right", want_grip)
+                self.right_hand_gripping = want_grip
+
+        # 更新目標
         with self.hand_target_lock:
-            for i, name in enumerate(msg.name):
-                if name.startswith('L_F'):
-                    # L_F1 ~ L_F6
-                    finger_idx = int(name.split('_F')[1]) - 1
-                    if 0 <= finger_idx < 6:
-                        self.left_hand_target[finger_idx] = max(0.0, min(1.0, msg.position[i]))
-                elif name.startswith('R_F'):
-                    # R_F1 ~ R_F6
-                    finger_idx = int(name.split('_F')[1]) - 1
-                    if 0 <= finger_idx < 6:
-                        self.right_hand_target[finger_idx] = max(0.0, min(1.0, msg.position[i]))
-        
+            if has_left:
+                self.left_hand_target = new_left
+            if has_right:
+                self.right_hand_target = new_right
+
         # Debug: 每 30 次輸出一次
         if not hasattr(self, '_ehand_log_count'):
             self._ehand_log_count = 0
         self._ehand_log_count += 1
         if self._ehand_log_count % 30 == 0:
-
-            # 顯示所有 6 個手指數值，保留 2 位小數
             l_str = str([round(x, 2) for x in self.left_hand_target])
             r_str = str([round(x, 2) for x in self.right_hand_target])
             self.get_logger().info(f"[ehand] L={l_str}, R={r_str}")
     
+    def _ehand_transition(self, side: str, to_grip: bool):
+        """靈巧手狀態轉換：disable → home → 等待 → enable
+
+        eHand 硬體特性：直接切換握/開會不穩定，
+        需要先 disable + home 重置後再設定新目標。
+        """
+        if side == "left":
+            hand = self.left_hand
+            can_id = DEXTEROUS_HAND_LEFT_CAN_ID
+            label = "Left"
+        else:
+            hand = self.right_hand
+            can_id = DEXTEROUS_HAND_RIGHT_CAN_ID
+            label = "Right"
+
+        if not hand or not hand.is_ready() or not self.zlgcan:
+            return
+
+        action = "GRIP" if to_grip else "OPEN"
+        self.get_logger().info(f"[ehand] {label} hand transition → {action}: disable→home→wait→enable")
+
+        CMD_DISABLE = bytes([0xFD, 0x00] + [0x00] * 30)
+        CMD_HOME = bytes([0xFD, 0x04] + [0x00] * 30)
+
+        # 1. DISABLE
+        self.zlgcan.transmit_fd(can_id, CMD_DISABLE)
+        if side == "left":
+            self.left_hand_disabled = True
+        else:
+            self.right_hand_disabled = True
+        time.sleep(0.1)
+
+        # 2. HOME
+        self.zlgcan.transmit_fd(can_id, CMD_HOME)
+        time.sleep(0.5)
+
+        # 3. ENABLE（清除 disabled flag，讓控制迴圈重新發送位置指令）
+        if side == "left":
+            self.left_hand_disabled = False
+        else:
+            self.right_hand_disabled = False
+
+        self.get_logger().info(f"[ehand] {label} hand transition done, ready for {action}")
+
     def _handle_ehand_special_command(self, cmd: str):
         """處理靈巧手特殊指令"""
         # 判斷左/右/雙手
