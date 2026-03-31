@@ -8,9 +8,11 @@ Step 0: 清理殘留程序
   ├── pkill unity_interface_follower
   └── pkill camera_publisher
 
-Step 1: 設置 CAN（cansetup.sh --reset）
-  ├── USB hub 斷電重啟 PCAN
-  ├── ip link set can1/can2 up (bitrate 1Mbps)
+Step 1: 設置 CAN（cansetup.sh，失敗時 fallback --reset）
+  ├── cansetup.sh：初始化 CAN 介面 (bitrate 1Mbps)
+  ├── 驗證 CAN UP？
+  │     ├── ✅ → 繼續
+  │     └── ❌ → cansetup.sh --reset（全 USB bus rescan）→ 再驗證
   └── 寫入 /tmp/can_arm_map
 
 Step 2: 讀取目前馬達位置 + 健康檢查
@@ -98,7 +100,22 @@ LEFT 5 +0.1738
 LEFT 6 -1.2228
 ```
 
+## cansetup.sh --reset：全 USB bus rescan
+
+`cansetup.sh --reset` 使用**全 USB bus rescan**（deauthorize + reauthorize 所有 USB bus），
+而非只 reset 單一 USB hub。
+
+| | 舊版（hub reset） | 新版（全 bus rescan） |
+|---|---|---|
+| **做法** | 找 PCAN 所在 hub，只 reset 該 hub | deauthorize/reauthorize 所有 USB bus |
+| **優點** | 影響範圍小 | 不需先找到 PCAN，100% 觸發重新 enumerate |
+| **缺點** | 找不到 PCAN 時無法恢復 | 所有 USB 裝置短暫斷線（藍牙、ZLGCAN、RealSense 等） |
+| **耗時** | ~8 秒 | ~7 秒 |
+
+在啟動流程中，reset 發生在 Step 1（所有服務尚未啟動），其他 USB 裝置斷線不影響。
+
 ## 修改的檔案
 
-1. `start_follower.sh` — 加入 Step 0（清理）、Step 1 改用 --reset、新增 Step 2（讀角度+健康檢查）
-2. `unity_interface_follower.py` — `_read_initial_positions()` 改為讀取 /tmp/initial_joint_positions，啟動時立即設 tracking_unity=True
+1. `start_follower.sh` — 加入 Step 0（清理）、Step 1 CAN 設置（失敗時 fallback --reset）、新增 Step 2（讀角度+健康檢查）
+2. `cansetup.sh` — `--reset` 改用全 USB bus rescan（取代單一 hub reset）
+3. `unity_interface_follower.py` — `_read_initial_positions()` 改為讀取 /tmp/initial_joint_positions，啟動時立即設 tracking_unity=True
