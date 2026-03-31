@@ -138,7 +138,7 @@ DYNAMIC_KP_KD_JOINTS = [0, 1]  # 只對 J1, J2 使用動態調整
 
 # 基礎 Kp/Kd（動態調整的基準值）
 # [2026-02-11] J1 提高 Kp 改善動態追蹤延遲
-BASE_KP = [70.0, 60.0, 25.0, 35.0, 30.0, 30.0, 50.0]
+BASE_KP = [60.0, 60.0, 25.0, 25.0, 30.0, 30.0, 50.0]
 BASE_KD = [5.0, 4.5, 1.2, 1.5, 1.0, 1.0, 1.2]
 
 # 動態調整參數
@@ -199,6 +199,7 @@ SYNC_GRIPPER_THRESHOLD = 0.02  # 夾爪值 < 此值視為「關閉」(單位: me
 # [TEMP DEMO] 鎖定特定關節到固定角度（不需要時改為空 dict）
 # 格式：{(side, joint_index): lock_rad}  side="left"/"right", joint_index=0~6 (J1~J7)
 LOCK_JOINTS = {
+    ("right", 2): 0.0,  # 右手 J3 鎖在 0 rad
     ("right", 4): 0.0,  # 右手 J5 鎖在 0 rad
 }
 
