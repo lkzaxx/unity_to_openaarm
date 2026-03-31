@@ -365,7 +365,9 @@ class UnityFollowerInterface(Node):
         self.right_arm.recv_all()
         
         # === 讀取當前位置作為初始目標 ===
-        self._read_initial_positions()
+        # [原始] self._read_initial_positions()  # refresh_all 在未 enable 時部分馬達讀不到
+        # [改用] 從 start_follower.sh Step 2 寫入的暫存檔讀取（用 0xFC enable 指令取得的真實角度）
+        self._load_initial_positions_from_file("/tmp/initial_joint_positions")
         
         # === ROS2 訂閱 ===
         # Use VOLATILE durability to ignore cached/stale messages from DDS.
@@ -462,7 +464,59 @@ class UnityFollowerInterface(Node):
         
         self.get_logger().info(f"Initial left positions: {[f'{p:.2f}' for p in self.left_target]}")
         self.get_logger().info(f"Initial right positions: {[f'{p:.2f}' for p in self.right_target]}")
-    
+
+    def _load_initial_positions_from_file(self, filepath):
+        """從 start_follower.sh Step 2 產生的暫存檔讀取初始角度，並立即啟用追蹤"""
+        left_pos = [0.0] * 7
+        right_pos = [0.0] * 7
+        loaded_count = 0
+
+        try:
+            with open(filepath) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = line.split()
+                    if len(parts) != 3:
+                        continue
+                    side, idx_str, val_str = parts
+                    idx = int(idx_str)
+                    val = float(val_str)
+                    if 0 <= idx < 7:
+                        if side == 'LEFT':
+                            left_pos[idx] = val
+                            loaded_count += 1
+                        elif side == 'RIGHT':
+                            right_pos[idx] = val
+                            loaded_count += 1
+
+            self.get_logger().info(f"✅ Loaded {loaded_count} joint positions from {filepath}")
+        except FileNotFoundError:
+            self.get_logger().warn(f"⚠️ {filepath} not found, falling back to refresh_all")
+            self._read_initial_positions()
+            return
+        except Exception as e:
+            self.get_logger().warn(f"⚠️ Failed to read {filepath}: {e}, falling back to refresh_all")
+            self._read_initial_positions()
+            return
+
+        # 寫入 target 和 smoothed
+        with self.target_lock:
+            for i in range(7):
+                self.left_target[i] = left_pos[i]
+                self.left_smoothed[i] = left_pos[i]
+                self.right_target[i] = right_pos[i]
+                self.right_smoothed[i] = right_pos[i]
+
+        # 立即啟用追蹤，控制迴圈開始後即維持此角度
+        self.left_tracking_unity = True
+        self.right_tracking_unity = True
+
+        self.get_logger().info(f"Initial left positions:  {[f'{p:.2f}' for p in left_pos]}")
+        self.get_logger().info(f"Initial right positions: {[f'{p:.2f}' for p in right_pos]}")
+        self.get_logger().info("🔒 Arms will hold current positions until Unity takes over")
+
     def _init_ruckig(self):
         """初始化 Ruckig 軌跡生成器"""
         self.get_logger().info("Initializing Ruckig trajectory generators...")
