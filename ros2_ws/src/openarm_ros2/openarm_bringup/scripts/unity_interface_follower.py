@@ -35,7 +35,7 @@ except ImportError:
 ENABLE_JOINT_LOGGING = True
 LOG_FREQUENCY = 50          # 記錄頻率 (Hz)
 LOG_MAX_DURATION = 60.0     # 最大記錄時長 (秒)
-AUTO_PLOT_ON_SHUTDOWN = True  # 關閉時自動繪圖
+AUTO_PLOT_ON_SHUTDOWN = False  # 關閉時自動繪圖
 
 if ENABLE_JOINT_LOGGING:
     try:
@@ -100,7 +100,8 @@ GRIPPER_RECV_ID = 0x18
 #   - L_EE / R_EE 命令 → 控制夾爪
 #   - L_F1~L_F6 / R_F1~R_F6 命令 → 控制靈巧手
 ENABLE_GRIPPER = True         # 啟用夾爪控制
-ENABLE_DEXTEROUS_HAND = True  # 啟用靈巧手控制（需要 USB CANFD 設備）
+ENABLE_DEXTEROUS_HAND = True  # 需保持 True 讓 ZLGCAN 初始化（SYNC_GRIPPER_TO_EHAND 需要）
+ENABLE_EHAND_SUBSCRIPTION = False  # 訂閱 /unity/ehand_commands — 目前用 SYNC_GRIPPER_TO_EHAND 代替
 
 # 靈巧手配置（使用 USB CANFD DEBUG 設備 via ZLGCAN SDK）
 # 注意：左右靈巧手共用同一個 USB CANFD 設備，透過不同 CAN ID 區分
@@ -130,7 +131,7 @@ DEXTEROUS_HAND_CONTROL_FREQ = 30    # 控制頻率 (Hz) - 時間估算機制會�
 # KD = [5.0, 4.5, 1.2, 1.5, 1.0, 1.0, 1.2]
 
 # [2026-02-10] 動態 Kp/Kd 方案（根據誤差大小調整）
-USE_DYNAMIC_KP_KD = True  # 開啟動態 Kp/Kd
+USE_DYNAMIC_KP_KD = False  # 開啟動態 Kp/Kd
 
 # [2026-02-11] 只對指定關節使用動態 Kp/Kd（其他關節出現震盪）
 DYNAMIC_KP_KD_JOINTS = [0, 1]  # 只對 J1, J2 使用動態調整
@@ -402,12 +403,14 @@ class UnityFollowerInterface(Node):
         # === 訂閱靈巧手命令（並存模式：總是訂閱，等待命令）===
         # 使用預設 QoS (depth=10) 讓 ros2 topic pub --once 也能送達
         # joint_commands 保持 VOLATILE 避免重啟時 replay 舊的手臂指令（安全考量）
-        if ENABLE_DEXTEROUS_HAND:
+        if ENABLE_DEXTEROUS_HAND and ENABLE_EHAND_SUBSCRIPTION:
             self.ehand_sub = self.create_subscription(
                 JointState, '/unity/ehand_commands',
                 self.ehand_callback, 10
             )
             self.get_logger().info("✓ Subscribed to /unity/ehand_commands")
+        elif ENABLE_DEXTEROUS_HAND:
+            self.get_logger().info("ℹ ehand subscription disabled (using SYNC_GRIPPER_TO_EHAND)")
         
         # === 發布 JointState 給 Unity ===
         self.joint_state_pub = self.create_publisher(
