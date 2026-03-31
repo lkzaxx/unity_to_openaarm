@@ -189,6 +189,12 @@ USE_DEADLINE_TIMING = False
 # [2026-02-05] 測試關閉 Ruckig，直接追蹤 Unity 目標
 USE_RUCKIG_SMOOTHING = False
 
+# [TEMP] 夾爪連動靈巧手：夾爪 L_EE/R_EE 同步控制靈巧手張合
+# True = 夾爪關閉時手也握，夾爪打開時手也張
+# 不需要時改為 False 即可停用
+SYNC_GRIPPER_TO_EHAND = True
+SYNC_GRIPPER_THRESHOLD = 0.02  # 夾爪值 < 此值視為「關閉」(單位: meters, 0=關 0.0425=開)
+
 # Ruckig 參數（只在 USE_RUCKIG_SMOOTHING = True 時使用）
 # [2026-01-30] A+ 方案：根據馬達實際能力調整（約 30~50% 馬達能力）
 # 舊值: [1.2, 1.2, 1.5, 1.5, 2.0, 2.0, 2.0]
@@ -618,8 +624,14 @@ class UnityFollowerInterface(Node):
                         self.right_target[joint_idx] = pos
                 elif name == 'L_EE':
                     self.left_gripper_target = self._gripper_to_motor(msg.position[i])
+                    # [TEMP] 夾爪連動靈巧手：夾爪關=手握，夾爪開=手開
+                    if SYNC_GRIPPER_TO_EHAND:
+                        self._sync_gripper_to_ehand("left", msg.position[i])
                 elif name == 'R_EE':
                     self.right_gripper_target = self._gripper_to_motor(msg.position[i])
+                    # [TEMP] 夾爪連動靈巧手：夾爪關=手握，夾爪開=手開
+                    if SYNC_GRIPPER_TO_EHAND:
+                        self._sync_gripper_to_ehand("right", msg.position[i])
     
     def _handle_special_command(self, cmd: str):
         """處理特殊指令：HOME (回零+禁用) / ENABLE (重新啟用)"""
@@ -735,6 +747,34 @@ class UnityFollowerInterface(Node):
             r_str = str([round(x, 2) for x in self.right_hand_target])
             self.get_logger().info(f"[ehand] L={l_str}, R={r_str}")
     
+    def _sync_gripper_to_ehand(self, side: str, gripper_meters: float):
+        """[TEMP] 夾爪連動靈巧手：夾爪開=手開(0.0)，夾爪關=手握(1.0)
+
+        gripper_meters: Unity 夾爪值 (0.0=關閉, 0.0425=打開)
+        """
+        # 夾爪值 < threshold → 關閉 → 手握(1.0)
+        # 夾爪值 >= threshold → 打開 → 手開(0.0)
+        grip_value = 0.0 if gripper_meters >= SYNC_GRIPPER_THRESHOLD else 1.0
+
+        if side == "left":
+            old_avg = sum(self.left_hand_target) / 6.0
+            new_target = [grip_value] * 6
+            want_grip = grip_value >= self._hand_transition_threshold
+            if want_grip != self.left_hand_gripping:
+                self._ehand_transition("left", want_grip)
+                self.left_hand_gripping = want_grip
+            with self.hand_target_lock:
+                self.left_hand_target = new_target
+        else:
+            old_avg = sum(self.right_hand_target) / 6.0
+            new_target = [grip_value] * 6
+            want_grip = grip_value >= self._hand_transition_threshold
+            if want_grip != self.right_hand_gripping:
+                self._ehand_transition("right", want_grip)
+                self.right_hand_gripping = want_grip
+            with self.hand_target_lock:
+                self.right_hand_target = new_target
+
     def _ehand_transition(self, side: str, to_grip: bool):
         """靈巧手狀態轉換：disable → home → 等待 → enable
 
