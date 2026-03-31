@@ -176,7 +176,7 @@ MAX_POSITION_RATE = [1.2, 1.2, 1.5, 1.5, 2.0, 2.0, 2.0]  # 各關節最大速度
 # A. 狀態快取：避免 control_loop 和 state_timer 同時操作 CAN
 #    True = 所有 CAN I/O 在 control_loop，Timer 只發布快取（推薦）
 #    False = 原始行為，Timer 也會操作 CAN
-USE_STATE_CACHE = False
+USE_STATE_CACHE = True  # Must be True to avoid CAN race condition (50Hz timer vs 500Hz control loop)
 
 # B. Deadline 時序：使用 perf_counter + deadline 避免時序漂移
 #    True = 使用 deadline 模式（推薦）
