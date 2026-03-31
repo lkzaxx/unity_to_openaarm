@@ -45,12 +45,28 @@ echo ""
 echo "Setting up CAN interfaces..."
 "$SCRIPT_DIR/cansetup.sh" --reset
 
+# 讀取 CAN mapping
+source /tmp/can_arm_map 2>/dev/null || { RIGHT_CAN=can1; LEFT_CAN=can2; }
+
+# 等待 CAN 介面就緒
+echo ""
+echo "Waiting for CAN interfaces to be ready..."
+for attempt in $(seq 1 10); do
+    if ip link show "$RIGHT_CAN" 2>/dev/null | grep -q "UP" && \
+       ip link show "$LEFT_CAN" 2>/dev/null | grep -q "UP"; then
+        echo "  ✅ $RIGHT_CAN and $LEFT_CAN are UP"
+        break
+    fi
+    if [ "$attempt" -eq 10 ]; then
+        echo "  ❌ CAN interfaces not ready after 5s, aborting."
+        exit 1
+    fi
+    sleep 0.5
+done
+
 # 2. 讀取目前馬達位置 + 健康檢查
 echo ""
 echo "[Step 2] Reading current motor positions..."
-
-# 讀取 CAN mapping
-source /tmp/can_arm_map 2>/dev/null || { RIGHT_CAN=can1; LEFT_CAN=can2; }
 
 SEND_IDS=(001 002 003 004 005 006 007)
 RECV_IDS=(011 012 013 014 015 016 017)
