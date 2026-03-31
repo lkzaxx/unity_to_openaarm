@@ -16,8 +16,8 @@ if [ "$(id -u)" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-RIGHT_SERIAL="206F307B4153"
-LEFT_SERIAL="2048335F5052"
+RIGHT_SERIAL="2048335F5052"
+LEFT_SERIAL="206F307B4153"
 
 # --reset: Full USB bus rescan to re-enumerate all USB devices
 # This deauthorizes ALL USB buses (usb1+usb2), waits, then reauthorizes.
