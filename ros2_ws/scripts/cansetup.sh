@@ -19,9 +19,7 @@ fi
 RIGHT_SERIAL="206F307B4153"
 LEFT_SERIAL="2048335F5052"
 
-# --reset: Full USB bus rescan to re-enumerate all USB devices
-# This deauthorizes ALL USB buses (usb1+usb2), waits, then reauthorizes.
-# All USB devices (Bluetooth, ZLGCAN, RealSense, etc.) will briefly disconnect.
+# --reset: USB reset PCAN devices first
 if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
     echo "=== Stopping CAN interfaces ==="
     for iface in $(ip -br link show type can 2>/dev/null | awk '{print $1}'); do
@@ -30,29 +28,14 @@ if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
     done
 
     echo ""
-    echo "=== Full USB bus rescan ==="
-    # Deauthorize all USB buses
-    for bus in /sys/bus/usb/devices/usb*/authorized; do
-        echo 0 > "$bus" 2>/dev/null
-    done
-    echo "  All USB buses deauthorized, waiting 2s..."
-    sleep 2
+    echo "=== Unloading pcan driver ==="
+    modprobe -r pcan 2>/dev/null && echo "  pcan unloaded" || echo "  pcan not loaded"
+    sleep 1
 
-    # Reauthorize all USB buses
-    for bus in /sys/bus/usb/devices/usb*/authorized; do
-        echo 1 > "$bus" 2>/dev/null
-    done
-    echo "  All USB buses reauthorized, waiting 5s for enumeration..."
-    sleep 5
-
-    # Verify PCAN devices came back
-    PCAN_COUNT=$(lsusb -d 0c72:0012 2>/dev/null | wc -l)
-    echo "  PCAN devices found: $PCAN_COUNT"
-    if [ "$PCAN_COUNT" -lt 2 ]; then
-        echo "  ⚠️ Expected 2 PCAN devices, found $PCAN_COUNT"
-    else
-        echo "  ✅ USB bus rescan done"
-    fi
+    echo "=== Reloading pcan driver ==="
+    modprobe pcan 2>/dev/null && echo "  pcan loaded" || echo "  pcan load failed"
+    sleep 3
+    sleep 3
     echo ""
 fi
 
