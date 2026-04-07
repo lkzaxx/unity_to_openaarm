@@ -1213,8 +1213,15 @@ class UnityFollowerInterface(Node):
         hand_control_interval = CONTROL_FREQUENCY // DEXTEROUS_HAND_CONTROL_FREQ  # 500/50=10
         loop_count = 0
         
+        # [DIAG] 控制迴圈頻率診斷
+        _diag_t0 = time.perf_counter()
+        _diag_count = 0
+        _diag_max_elapsed = 0.0
+
         while self.running:
+            _loop_t_start = time.perf_counter()
             loop_count += 1
+            _diag_count += 1
             # === 時序控制：根據模式選擇 ===
             if USE_DEADLINE_TIMING:
                 next_deadline += CONTROL_PERIOD
@@ -1455,7 +1462,25 @@ class UnityFollowerInterface(Node):
                 
             except Exception as e:
                 self.get_logger().error(f"Control error: {e}")
-            
+
+            # [DIAG] 測量迴圈耗時
+            _loop_elapsed = time.perf_counter() - _loop_t_start
+            if _loop_elapsed > _diag_max_elapsed:
+                _diag_max_elapsed = _loop_elapsed
+            # 每 1000 次（~2秒）輸出一次診斷
+            if _diag_count >= 1000:
+                _diag_dt = time.perf_counter() - _diag_t0
+                _diag_hz = _diag_count / _diag_dt if _diag_dt > 0 else 0
+                self.get_logger().info(
+                    f"[DIAG] loop={_diag_hz:.0f}Hz, "
+                    f"avg={_diag_dt/_diag_count*1000:.2f}ms, "
+                    f"max={_diag_max_elapsed*1000:.2f}ms, "
+                    f"ruckig_err={self._ruckig_error_count if hasattr(self, '_ruckig_error_count') else 'N/A'}"
+                )
+                _diag_t0 = time.perf_counter()
+                _diag_count = 0
+                _diag_max_elapsed = 0.0
+
             # === 時序控制：維持控制頻率 ===
             if USE_DEADLINE_TIMING:
                 # Deadline 模式：等待到下一個時間點
