@@ -499,6 +499,11 @@ class UnityFollowerInterface(Node):
         
         # === 狀態發布 Timer (50Hz) ===
         self.state_timer = self.create_timer(0.02, self.publish_joint_states)
+
+        # === 靈巧手控制 Timer (獨立於 control_loop，避免 USB 阻塞拖慢 CAN 控制) ===
+        # [2026-04-07] ZLGCAN USB usb_bulk_read 阻塞 120ms~2s，從 control_loop 移出
+        hand_period = 1.0 / DEXTEROUS_HAND_CONTROL_FREQ  # 1/30 = 33ms
+        self.hand_timer = self.create_timer(hand_period, self._hand_timer_callback)
         
         self.get_logger().info("✅ Unity Follower Interface started!")
         self.get_logger().info("⏳ Arms IDLE — waiting for first external command before sending MIT control")
@@ -1356,11 +1361,6 @@ class UnityFollowerInterface(Node):
             left_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, left_grip, 0.0, 0.0)]
             right_grip_cmds = [oa.MITParam(GRIPPER_KP, GRIPPER_KD, right_grip, 0.0, 0.0)]
 
-            # 準備靈巧手手指目標（在主執行緒取得 lock，避免子執行緒搶 lock）
-            with self.hand_target_lock:
-                left_fingers = self.left_hand_target[:]
-                right_fingers = self.right_hand_target[:]
-
             # 發送到馬達（左右臂並行）
             # [2026-04-07] 左右臂用不同 CAN socket，ThreadPoolExecutor 並行送收
             # 靈巧手控制在主執行緒（ZLGCAN 共用 USB 設備，不可並行存取）
@@ -1400,12 +1400,8 @@ class UnityFollowerInterface(Node):
 
                 _t_can_done = time.perf_counter()  # [DIAG]
 
-                # 靈巧手控制（主執行緒，降頻）
-                if loop_count % hand_control_interval == 0:
-                    if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled:
-                        self.left_hand.send_positions(left_fingers)
-                    if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled:
-                        self.right_hand.send_positions(right_fingers)
+                # [2026-04-07] 靈巧手控制已移出 control_loop → 獨立 timer
+                # ZLGCAN USB 設備 usb_bulk_read 阻塞會拖慢整個控制迴圈
 
                 # [DIAG] 超過 10ms 的迴圈個別印出
                 _t_can_ms = (_t_can_done - _t_can) * 1000
@@ -1511,6 +1507,20 @@ class UnityFollowerInterface(Node):
                 if sleep_time > 0:
                     time.sleep(sleep_time)
     
+    def _hand_timer_callback(self):
+        """靈巧手控制（獨立 Timer，30Hz，不阻塞 control_loop）"""
+        try:
+            with self.hand_target_lock:
+                left_fingers = self.left_hand_target[:]
+                right_fingers = self.right_hand_target[:]
+
+            if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled:
+                self.left_hand.send_positions(left_fingers)
+            if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled:
+                self.right_hand.send_positions(right_fingers)
+        except Exception as e:
+            pass  # USB 錯誤不影響手臂控制
+
     def publish_joint_states(self):
         """發布當前關節狀態給 Unity (50Hz)"""
         try:
