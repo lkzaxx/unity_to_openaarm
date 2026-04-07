@@ -500,10 +500,12 @@ class UnityFollowerInterface(Node):
         # === 狀態發布 Timer (50Hz) ===
         self.state_timer = self.create_timer(0.02, self.publish_joint_states)
 
-        # === 靈巧手控制 Timer (獨立於 control_loop，避免 USB 阻塞拖慢 CAN 控制) ===
-        # [2026-04-07] ZLGCAN USB usb_bulk_read 阻塞 120ms~2s，從 control_loop 移出
-        hand_period = 1.0 / DEXTEROUS_HAND_CONTROL_FREQ  # 1/30 = 33ms
-        self.hand_timer = self.create_timer(hand_period, self._hand_timer_callback)
+        # === 靈巧手控制（完全獨立的 daemon thread）===
+        # [2026-04-07] ZLGCAN USB usb_bulk_read 阻塞 120ms~2s
+        # 不能用 ROS2 timer（single-threaded executor 會卡住所有 callback 包括 unity_callback）
+        # 用獨立 thread + sleep 迴圈
+        self.hand_thread = threading.Thread(target=self._hand_loop, daemon=True)
+        self.hand_thread.start()
         
         self.get_logger().info("✅ Unity Follower Interface started!")
         self.get_logger().info("⏳ Arms IDLE — waiting for first external command before sending MIT control")
@@ -1507,19 +1509,22 @@ class UnityFollowerInterface(Node):
                 if sleep_time > 0:
                     time.sleep(sleep_time)
     
-    def _hand_timer_callback(self):
-        """靈巧手控制（獨立 Timer，30Hz，不阻塞 control_loop）"""
-        try:
-            with self.hand_target_lock:
-                left_fingers = self.left_hand_target[:]
-                right_fingers = self.right_hand_target[:]
+    def _hand_loop(self):
+        """靈巧手控制（獨立 daemon thread，30Hz，完全不影響 ROS2 executor）"""
+        hand_period = 1.0 / DEXTEROUS_HAND_CONTROL_FREQ
+        while self.running:
+            try:
+                with self.hand_target_lock:
+                    left_fingers = self.left_hand_target[:]
+                    right_fingers = self.right_hand_target[:]
 
-            if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled:
-                self.left_hand.send_positions(left_fingers)
-            if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled:
-                self.right_hand.send_positions(right_fingers)
-        except Exception as e:
-            pass  # USB 錯誤不影響手臂控制
+                if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled:
+                    self.left_hand.send_positions(left_fingers)
+                if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled:
+                    self.right_hand.send_positions(right_fingers)
+            except Exception:
+                pass  # USB 錯誤不影響手臂控制
+            time.sleep(hand_period)
 
     def publish_joint_states(self):
         """發布當前關節狀態給 Unity (50Hz)"""
