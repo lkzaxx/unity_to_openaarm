@@ -1174,9 +1174,9 @@ class UnityFollowerInterface(Node):
         
         return compensations
 
-    def _control_one_arm(self, side, arm, arm_cmds, grip_cmds, hand, hand_disabled,
-                         hand_fingers, homing_flag, loop_count, hand_control_interval):
+    def _control_one_arm(self, side, arm, arm_cmds, grip_cmds, homing_flag):
         """單臂 CAN 控制（送指令 + 收回應），設計為可被 ThreadPoolExecutor 並行呼叫。
+        注意：靈巧手控制已移出到主執行緒（ZLGCAN 共用設備不可並行存取）
 
         Returns:
             str or None: "home_reached" 如果回零完成，否則 None
@@ -1185,10 +1185,6 @@ class UnityFollowerInterface(Node):
 
         if ENABLE_GRIPPER:
             arm.get_gripper().mit_control_all(grip_cmds)
-
-        # 靈巧手（降頻控制）
-        if hand and hand.is_ready() and not hand_disabled and loop_count % hand_control_interval == 0:
-            hand.send_positions(hand_fingers)
 
         arm.recv_all(500)
 
@@ -1367,7 +1363,9 @@ class UnityFollowerInterface(Node):
 
             # 發送到馬達（左右臂並行）
             # [2026-04-07] 左右臂用不同 CAN socket，ThreadPoolExecutor 並行送收
+            # 靈巧手控制在主執行緒（ZLGCAN 共用 USB 設備，不可並行存取）
             try:
+                _t_can = time.perf_counter()  # [DIAG]
                 left_future = None
                 right_future = None
 
@@ -1375,21 +1373,17 @@ class UnityFollowerInterface(Node):
                     left_future = self.arm_executor.submit(
                         self._control_one_arm,
                         "left", self.left_arm, left_arm_cmds, left_grip_cmds,
-                        self.left_hand, self.left_hand_disabled,
-                        left_fingers, self.left_homing,
-                        loop_count, hand_control_interval
+                        self.left_homing
                     )
 
                 if not self.right_disabled and self.right_tracking_unity:
                     right_future = self.arm_executor.submit(
                         self._control_one_arm,
                         "right", self.right_arm, right_arm_cmds, right_grip_cmds,
-                        self.right_hand, self.right_hand_disabled,
-                        right_fingers, self.right_homing,
-                        loop_count, hand_control_interval
+                        self.right_homing
                     )
 
-                # 等待兩臂完成
+                # 等待兩臂 CAN 完成
                 if left_future is not None:
                     left_result = left_future.result()
                     if left_result == "home_reached":
@@ -1403,6 +1397,20 @@ class UnityFollowerInterface(Node):
                         self.right_disabled = True
                         self.right_homing = False
                         self.get_logger().info("Right arm: home reached, disabled")
+
+                _t_can_done = time.perf_counter()  # [DIAG]
+
+                # 靈巧手控制（主執行緒，降頻）
+                if loop_count % hand_control_interval == 0:
+                    if self.left_hand and self.left_hand.is_ready() and not self.left_hand_disabled:
+                        self.left_hand.send_positions(left_fingers)
+                    if self.right_hand and self.right_hand.is_ready() and not self.right_hand_disabled:
+                        self.right_hand.send_positions(right_fingers)
+
+                # [DIAG] 超過 10ms 的迴圈個別印出
+                _t_can_ms = (_t_can_done - _t_can) * 1000
+                if _t_can_ms > 10.0:
+                    self.get_logger().warn(f"[DIAG] CAN slow: {_t_can_ms:.1f}ms")
                 
                 # ===== [JOINT_LOGGER] 記錄數據 - 開始 =====
                 if self.joint_logger is not None and self.joint_logger.is_recording:
