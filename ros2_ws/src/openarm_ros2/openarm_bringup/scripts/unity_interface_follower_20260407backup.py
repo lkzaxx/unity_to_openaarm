@@ -192,8 +192,7 @@ USE_DEADLINE_TIMING = True
 #    True = 使用 Ruckig 平滑 + 速度前饋（推薦）
 #    False = 使用原始 rate limiting
 # [2026-02-05] 測試關閉 Ruckig，直接追蹤 Unity 目標
-# [2026-04-07] 重新開啟 Ruckig：消除階梯目標 + 提供速度前饋
-USE_RUCKIG_SMOOTHING = True
+USE_RUCKIG_SMOOTHING = False
 
 # [TEMP] 夾爪連動靈巧手：夾爪 L_EE/R_EE 同步控制靈巧手張合
 # True = 夾爪關閉時手也握，夾爪打開時手也張
@@ -213,9 +212,7 @@ LOCK_JOINTS = {}
 # Ruckig 參數（只在 USE_RUCKIG_SMOOTHING = True 時使用）
 # [2026-01-30] A+ 方案：根據馬達實際能力調整（約 30~50% 馬達能力）
 # 舊值: [1.2, 1.2, 1.5, 1.5, 2.0, 2.0, 2.0]
-# [2026-04-07] 同步到 MAX_POSITION_RATE，避免 Ruckig 比 rate limiting 更慢
-# 舊值: [4.0, 4.0, 2.5, 2.5, 6.0, 6.0, 6.0]
-RUCKIG_MAX_VELOCITY = [6.0, 6.0, 2.5, 2.5, 8.0, 8.0, 8.0]  # rad/s
+RUCKIG_MAX_VELOCITY = [4.0, 4.0, 2.5, 2.5, 6.0, 6.0, 6.0]  # rad/s
 # 舊值: [8.0, 8.0, 12.0, 12.0, 15.0, 15.0, 15.0]
 RUCKIG_MAX_ACCELERATION = [20.0, 20.0, 15.0, 15.0, 30.0, 30.0, 30.0]  # rad/s²
 # 舊值: [40.0, 40.0, 60.0, 60.0, 80.0, 80.0, 80.0]
@@ -576,55 +573,37 @@ class UnityFollowerInterface(Node):
     def _init_ruckig(self):
         """初始化 Ruckig 軌跡生成器"""
         self.get_logger().info("Initializing Ruckig trajectory generators...")
-
-        # [2026-04-07] 初始位置安全檢查：如果 smoothed 全是 0 但不太可能全關節都在零位，警告
-        left_all_zero = all(abs(p) < 1e-6 for p in self.left_smoothed)
-        right_all_zero = all(abs(p) < 1e-6 for p in self.right_smoothed)
-        if left_all_zero:
-            self.get_logger().warn("⚠️ Ruckig: left_smoothed 全為 0，可能未正確讀取初始位置")
-        if right_all_zero:
-            self.get_logger().warn("⚠️ Ruckig: right_smoothed 全為 0，可能未正確讀取初始位置")
-
+        
         # 左臂 Ruckig
         self.left_otg = Ruckig(7, CONTROL_PERIOD)
         self.left_ruckig_input = InputParameter(7)
         self.left_ruckig_output = OutputParameter(7)
-
+        
         # 右臂 Ruckig
         self.right_otg = Ruckig(7, CONTROL_PERIOD)
         self.right_ruckig_input = InputParameter(7)
         self.right_ruckig_output = OutputParameter(7)
-
+        
         # 設定限制
         for inp in [self.left_ruckig_input, self.right_ruckig_input]:
             inp.max_velocity = RUCKIG_MAX_VELOCITY
             inp.max_acceleration = RUCKIG_MAX_ACCELERATION
             inp.max_jerk = RUCKIG_MAX_JERK
-
+        
         # 初始化當前狀態（使用讀取的初始位置）
         self.left_ruckig_input.current_position = self.left_smoothed[:]
         self.left_ruckig_input.current_velocity = [0.0] * 7
         self.left_ruckig_input.current_acceleration = [0.0] * 7
-
+        
         self.right_ruckig_input.current_position = self.right_smoothed[:]
         self.right_ruckig_input.current_velocity = [0.0] * 7
         self.right_ruckig_input.current_acceleration = [0.0] * 7
-
-        # 初始 target = 當前位置（避免第一拍就產生跳變）
-        self.left_ruckig_input.target_position = self.left_smoothed[:]
-        self.right_ruckig_input.target_position = self.right_smoothed[:]
-
+        
         # 速度前饋快取
         self.left_velocity_ff = [0.0] * 7
         self.right_velocity_ff = [0.0] * 7
-
-        # Ruckig error 計數器（避免 log 洗頻）
-        self._ruckig_error_count = 0
-
-        self.get_logger().info(f"✅ Ruckig initialized!")
-        self.get_logger().info(f"   max_velocity: {RUCKIG_MAX_VELOCITY}")
-        self.get_logger().info(f"   max_acceleration: {RUCKIG_MAX_ACCELERATION}")
-        self.get_logger().info(f"   max_jerk: {RUCKIG_MAX_JERK}")
+        
+        self.get_logger().info("✅ Ruckig initialized!")
     
     # ===== [JOINT_LOGGER] 開始記錄輔助方法 - 開始 =====
     def _start_joint_logging(self):
@@ -1241,45 +1220,27 @@ class UnityFollowerInterface(Node):
                 # Ruckig 模式：使用 jerk-limited 軌跡
                 self.left_ruckig_input.target_position = left_target
                 self.right_ruckig_input.target_position = right_target
-
+                
                 # 更新左臂軌跡
-                left_ruckig_result = self.left_otg.update(self.left_ruckig_input, self.left_ruckig_output)
-                if left_ruckig_result < 0:
-                    # Error: 保持上一次位置，清零速度前饋
-                    left_pos = self.left_smoothed[:]
-                    self.left_velocity_ff = [0.0] * 7
-                    # 重置 Ruckig 狀態到當前 smoothed，避免持續 Error
-                    self.left_ruckig_input.current_position = self.left_smoothed[:]
-                    self.left_ruckig_input.current_velocity = [0.0] * 7
-                    self.left_ruckig_input.current_acceleration = [0.0] * 7
-                    self._ruckig_error_count += 1
-                    if self._ruckig_error_count <= 5 or self._ruckig_error_count % 500 == 0:
-                        self.get_logger().warn(f"⚠️ Ruckig left error (result={left_ruckig_result}), count={self._ruckig_error_count}")
-                else:
-                    left_pos = list(self.left_ruckig_output.new_position)
-                    self.left_velocity_ff = list(self.left_ruckig_output.new_velocity)
-                    self.left_ruckig_input.current_position = left_pos
-                    self.left_ruckig_input.current_velocity = self.left_velocity_ff
-                    self.left_ruckig_input.current_acceleration = list(self.left_ruckig_output.new_acceleration)
-
+                left_result = self.left_otg.update(self.left_ruckig_input, self.left_ruckig_output)
+                left_pos = list(self.left_ruckig_output.new_position)
+                self.left_velocity_ff = list(self.left_ruckig_output.new_velocity)
+                
+                # 更新 Ruckig 狀態
+                self.left_ruckig_input.current_position = left_pos
+                self.left_ruckig_input.current_velocity = self.left_velocity_ff
+                self.left_ruckig_input.current_acceleration = list(self.left_ruckig_output.new_acceleration)
+                
                 # 更新右臂軌跡
-                right_ruckig_result = self.right_otg.update(self.right_ruckig_input, self.right_ruckig_output)
-                if right_ruckig_result < 0:
-                    right_pos = self.right_smoothed[:]
-                    self.right_velocity_ff = [0.0] * 7
-                    self.right_ruckig_input.current_position = self.right_smoothed[:]
-                    self.right_ruckig_input.current_velocity = [0.0] * 7
-                    self.right_ruckig_input.current_acceleration = [0.0] * 7
-                    self._ruckig_error_count += 1
-                    if self._ruckig_error_count <= 5 or self._ruckig_error_count % 500 == 0:
-                        self.get_logger().warn(f"⚠️ Ruckig right error (result={right_ruckig_result}), count={self._ruckig_error_count}")
-                else:
-                    right_pos = list(self.right_ruckig_output.new_position)
-                    self.right_velocity_ff = list(self.right_ruckig_output.new_velocity)
-                    self.right_ruckig_input.current_position = right_pos
-                    self.right_ruckig_input.current_velocity = self.right_velocity_ff
-                    self.right_ruckig_input.current_acceleration = list(self.right_ruckig_output.new_acceleration)
-
+                right_result = self.right_otg.update(self.right_ruckig_input, self.right_ruckig_output)
+                right_pos = list(self.right_ruckig_output.new_position)
+                self.right_velocity_ff = list(self.right_ruckig_output.new_velocity)
+                
+                # 更新 Ruckig 狀態
+                self.right_ruckig_input.current_position = right_pos
+                self.right_ruckig_input.current_velocity = self.right_velocity_ff
+                self.right_ruckig_input.current_acceleration = list(self.right_ruckig_output.new_acceleration)
+                
                 # 同步 smoothed 變數（給其他功能使用）
                 self.left_smoothed = left_pos[:]
                 self.right_smoothed = right_pos[:]
