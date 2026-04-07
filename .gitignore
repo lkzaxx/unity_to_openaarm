@@ -9,6 +9,7 @@
 .wget-hsts
 .Xauthority
 .xsessionrc
+.claude
 
 # 系統目錄
 .cache/
@@ -96,3 +97,13 @@ realsense/hid-sensor-hub-build/
 # NVIDIA Compute Cache
 .nv/
 yolov8n.pt
+
+# === OpenClaw 運維檔案 ===
+.claude.json
+.openclaw-followups.txt
+.openclaw-last-known-good
+.openclaw-webhook
+.openclaw-staging/
+openclaw-backup-*.tgz
+openclaw-src-extras-*.tgz
+openclaw_src_staging/
