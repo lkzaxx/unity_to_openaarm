@@ -1475,15 +1475,20 @@ class UnityFollowerInterface(Node):
             _loop_elapsed = time.perf_counter() - _loop_t_start
             if _loop_elapsed > _diag_max_elapsed:
                 _diag_max_elapsed = _loop_elapsed
-            # 每 1000 次（~2秒）輸出一次診斷
-            if _diag_count >= 1000:
+            # 每 200 次輸出一次診斷（加快頻率以捕捉命令後的行為）
+            if _diag_count >= 200:
                 _diag_dt = time.perf_counter() - _diag_t0
                 _diag_hz = _diag_count / _diag_dt if _diag_dt > 0 else 0
+                # 追蹤右臂 J4 (index 3) 的 Ruckig 輸出 vs 目標
+                _r_j4_smooth = self.right_smoothed[3] if len(self.right_smoothed) > 3 else -1
+                _r_j4_target = right_target[3] if len(right_target) > 3 else -1
+                _r_j4_vff = self.right_velocity_ff[3] if len(self.right_velocity_ff) > 3 else 0
                 self.get_logger().info(
                     f"[DIAG] loop={_diag_hz:.0f}Hz, "
                     f"avg={_diag_dt/_diag_count*1000:.2f}ms, "
                     f"max={_diag_max_elapsed*1000:.2f}ms, "
-                    f"ruckig_err={self._ruckig_error_count if hasattr(self, '_ruckig_error_count') else 'N/A'}"
+                    f"ruckig_err={self._ruckig_error_count if hasattr(self, '_ruckig_error_count') else 'N/A'}, "
+                    f"R_J4: target={_r_j4_target:.3f} smooth={_r_j4_smooth:.3f} vff={_r_j4_vff:.3f}"
                 )
                 _diag_t0 = time.perf_counter()
                 _diag_count = 0
