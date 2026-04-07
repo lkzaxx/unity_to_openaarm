@@ -792,18 +792,19 @@ class UnityFollowerInterface(Node):
                     has_right = True
 
         # 檢查握合狀態變化，執行 disable→home→等待→enable 流程
+        # [2026-04-07] 非阻塞：在獨立 thread 執行，不卡 ROS2 executor
         if has_left:
             avg_left = sum(new_left) / 6.0
             want_grip = avg_left >= self._hand_transition_threshold
             if want_grip != self.left_hand_gripping:
-                self._ehand_transition("left", want_grip)
+                threading.Thread(target=self._ehand_transition, args=("left", want_grip), daemon=True).start()
                 self.left_hand_gripping = want_grip
 
         if has_right:
             avg_right = sum(new_right) / 6.0
             want_grip = avg_right >= self._hand_transition_threshold
             if want_grip != self.right_hand_gripping:
-                self._ehand_transition("right", want_grip)
+                threading.Thread(target=self._ehand_transition, args=("right", want_grip), daemon=True).start()
                 self.right_hand_gripping = want_grip
 
         # 更新目標
@@ -832,20 +833,19 @@ class UnityFollowerInterface(Node):
         grip_value = 0.0 if gripper_meters >= SYNC_GRIPPER_THRESHOLD else 1.0
 
         if side == "left":
-            old_avg = sum(self.left_hand_target) / 6.0
             new_target = [grip_value] * 6
             want_grip = grip_value >= self._hand_transition_threshold
             if want_grip != self.left_hand_gripping:
-                self._ehand_transition("left", want_grip)
+                # [2026-04-07] 非阻塞：在獨立 thread 執行 transition，不卡 ROS2 executor
+                threading.Thread(target=self._ehand_transition, args=("left", want_grip), daemon=True).start()
                 self.left_hand_gripping = want_grip
             with self.hand_target_lock:
                 self.left_hand_target = new_target
         else:
-            old_avg = sum(self.right_hand_target) / 6.0
             new_target = [grip_value] * 6
             want_grip = grip_value >= self._hand_transition_threshold
             if want_grip != self.right_hand_gripping:
-                self._ehand_transition("right", want_grip)
+                threading.Thread(target=self._ehand_transition, args=("right", want_grip), daemon=True).start()
                 self.right_hand_gripping = want_grip
             with self.hand_target_lock:
                 self.right_hand_target = new_target
