@@ -1371,6 +1371,13 @@ class UnityFollowerInterface(Node):
                 left_future = None
                 right_future = None
 
+                # [DIAG] 每 1000 次印一次 CAN 送出狀態
+                if loop_count % 1000 == 0:
+                    self.get_logger().info(
+                        f"[DIAG-CAN] L: disabled={self.left_disabled} tracking={self.left_tracking_unity} | "
+                        f"R: disabled={self.right_disabled} tracking={self.right_tracking_unity}"
+                    )
+
                 if not self.left_disabled and self.left_tracking_unity:
                     left_future = self.arm_executor.submit(
                         self._control_one_arm,
