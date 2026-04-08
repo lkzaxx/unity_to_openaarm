@@ -33,8 +33,21 @@ if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
 
     echo "=== Reloading pcan driver ==="
     modprobe pcan 2>/dev/null && echo "  pcan loaded" || echo "  pcan load failed"
-    sleep 3
-    sleep 3
+
+    # [2026-04-08] 等待兩個 PCAN USB 設備都被 kernel 列舉（最多 15 秒）
+    echo "  Waiting for 2 PCAN USB devices..."
+    for i in $(seq 1 30); do
+        count=$(ls -d /sys/class/pcan/pcanusbfd* 2>/dev/null | wc -l)
+        if [ "$count" -ge 2 ]; then
+            echo "  Found $count PCAN devices (${i}x0.5s)"
+            break
+        fi
+        sleep 0.5
+    done
+    count=$(ls -d /sys/class/pcan/pcanusbfd* 2>/dev/null | wc -l)
+    if [ "$count" -lt 2 ]; then
+        echo "  WARNING: Only found $count PCAN device(s) after 15s!"
+    fi
     echo ""
 fi
 
