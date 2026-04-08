@@ -34,19 +34,22 @@ if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
     echo "=== Reloading pcan driver ==="
     modprobe pcan 2>/dev/null && echo "  pcan loaded" || echo "  pcan load failed"
 
-    # [2026-04-08] 等待兩個 PCAN USB 設備都被 kernel 列舉（最多 15 秒）
-    echo "  Waiting for 2 PCAN USB devices..."
-    for i in $(seq 1 30); do
-        count=$(ls -d /sys/class/pcan/pcanusbfd* 2>/dev/null | wc -l)
-        if [ "$count" -ge 2 ]; then
-            echo "  Found $count PCAN devices (${i}x0.5s)"
+    # [2026-04-08] 等待兩個 PCAN USB 設備和 CAN interface 都就緒（最多 30 秒）
+    echo "  Waiting for 2 PCAN USB devices + CAN interfaces..."
+    for i in $(seq 1 60); do
+        pcan_count=$(ls -d /sys/class/pcan/pcanusbfd* 2>/dev/null | wc -l)
+        # 計算非 can0 的 CAN interface 數量
+        can_count=$(ip -br link show type can 2>/dev/null | awk '{print $1}' | grep -v can0 | wc -l)
+        if [ "$pcan_count" -ge 2 ] && [ "$can_count" -ge 2 ]; then
+            echo "  Ready: $pcan_count PCAN devices, $can_count CAN interfaces ($((i/2)).$(( (i%2)*5 ))s)"
             break
         fi
         sleep 0.5
     done
-    count=$(ls -d /sys/class/pcan/pcanusbfd* 2>/dev/null | wc -l)
-    if [ "$count" -lt 2 ]; then
-        echo "  WARNING: Only found $count PCAN device(s) after 15s!"
+    pcan_count=$(ls -d /sys/class/pcan/pcanusbfd* 2>/dev/null | wc -l)
+    can_count=$(ip -br link show type can 2>/dev/null | awk '{print $1}' | grep -v can0 | wc -l)
+    if [ "$pcan_count" -lt 2 ] || [ "$can_count" -lt 2 ]; then
+        echo "  WARNING: pcan=$pcan_count, can_ifaces=$can_count after 30s!"
     fi
     echo ""
 fi
