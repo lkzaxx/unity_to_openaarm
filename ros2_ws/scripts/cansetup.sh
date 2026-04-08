@@ -7,17 +7,16 @@
 #   206F307B4153 (4153) = Right Arm
 #   2048335F5052 (5052) = Left Arm
 #
-# pcan driver names CAN interfaces in USB enumeration order:
-#   lowest USB path → can1, next → can2
-# So we find each PCAN's USB path, sort, and map accordingly.
+# [2026-04-08] 修正：不再假設 USB path 排序 = can 編號順序
+# 改用 pcan sysfs → device symlink → USB parent → serial 直接查詢
 
 # Auto-elevate to root if not already
 if [ "$(id -u)" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-RIGHT_SERIAL="2048335F5052"
-LEFT_SERIAL="206F307B4153"
+RIGHT_SERIAL="206F307B4153"
+LEFT_SERIAL="2048335F5052"
 
 # --reset: USB reset PCAN devices first
 if [ "$1" = "--reset" ] || [ "$1" = "-r" ]; then
@@ -48,28 +47,55 @@ for iface in $(ip -br link show type can 2>/dev/null | awk '{print $1}' | grep -
     ip link set "$iface" up 2>/dev/null
 done
 
-# Step 2: Find PCAN USB devices, sort by path → map to can1/can2
+# Step 2: 透過 pcan sysfs 直接查詢 CAN interface → USB serial 對應
+# 方法：pcan device → device symlink → 往上找 USB parent → 讀 serial
+# 這個方法不受 USB 列舉順序影響，100% 可靠
 declare -A SERIAL_TO_CAN
-idx=1
-for dev in $(for d in /sys/bus/usb/devices/*/idVendor; do
-    dir=$(dirname "$d")
-    vendor=$(cat "$dir/idVendor" 2>/dev/null)
-    product=$(cat "$dir/idProduct" 2>/dev/null)
-    if [ "$vendor" = "0c72" ] && [ "$product" = "0012" ]; then
-        echo "$(basename "$dir")"
+echo "=== Detecting PCAN serial mapping ==="
+for pcan_dev in /sys/class/pcan/pcanusbfd*; do
+    [ -d "$pcan_dev" ] || continue
+    ndev=$(cat "$pcan_dev/ndev" 2>/dev/null)
+    [ -z "$ndev" ] && continue
+
+    # 從 pcan device 的 device symlink 往上追溯到 USB device
+    devpath=$(readlink -f "$pcan_dev/device" 2>/dev/null)
+    serial=""
+    while [ "$devpath" != "/" ] && [ -n "$devpath" ]; do
+        if [ -f "$devpath/serial" ]; then
+            serial=$(cat "$devpath/serial")
+            break
+        fi
+        devpath=$(dirname "$devpath")
+    done
+
+    if [ -n "$serial" ]; then
+        SERIAL_TO_CAN["$serial"]="$ndev"
+        echo "  $ndev → USB serial=$serial"
+    else
+        echo "  $ndev → serial not found (WARNING)"
     fi
-done | sort); do
-    serial=$(cat "/sys/bus/usb/devices/$dev/serial" 2>/dev/null)
-    SERIAL_TO_CAN["$serial"]="can${idx}"
-    ((idx++))
 done
 
 RIGHT_CAN="${SERIAL_TO_CAN[$RIGHT_SERIAL]}"
 LEFT_CAN="${SERIAL_TO_CAN[$LEFT_SERIAL]}"
 
 # Fallback if detection fails
-[ -z "$RIGHT_CAN" ] && RIGHT_CAN="can1"
-[ -z "$LEFT_CAN" ] && LEFT_CAN="can2"
+if [ -z "$RIGHT_CAN" ]; then
+    echo "WARNING: Right arm serial $RIGHT_SERIAL not found, falling back to can1"
+    RIGHT_CAN="can1"
+fi
+if [ -z "$LEFT_CAN" ]; then
+    echo "WARNING: Left arm serial $LEFT_SERIAL not found, falling back to can2"
+    LEFT_CAN="can2"
+fi
+
+# Sanity check: left and right should not be the same
+if [ "$RIGHT_CAN" = "$LEFT_CAN" ]; then
+    echo "ERROR: Right and Left mapped to same interface ($RIGHT_CAN)!"
+    echo "Falling back: Right=can1, Left=can2"
+    RIGHT_CAN="can1"
+    LEFT_CAN="can2"
+fi
 
 # Save mapping
 cat > /tmp/can_arm_map << EOF
@@ -78,6 +104,7 @@ LEFT_CAN=$LEFT_CAN
 EOF
 chmod 644 /tmp/can_arm_map
 
+echo ""
 echo "Mapping: Right Arm = $RIGHT_CAN, Left Arm = $LEFT_CAN"
 echo "$RIGHT_CAN (Right Arm) UP"
 echo "$LEFT_CAN (Left Arm) UP"
