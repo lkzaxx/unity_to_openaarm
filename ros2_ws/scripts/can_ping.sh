@@ -41,6 +41,10 @@ show_menu() {
     echo "║  15) Right ALL       16) Left ALL          ║"
     echo "║  17) ALL (Right+Left)                      ║"
     echo "║                                            ║"
+    echo "║  18) Quick: Both arms (only show failures) ║"
+    echo "║  19) Quick: Right arm (only show failures) ║"
+    echo "║  20) Quick: Left arm  (only show failures) ║"
+    echo "║                                            ║"
     echo "║  0) Exit                                   ║"
     echo "╚══════════════════════════════════════════════╝"
     echo ""
@@ -207,6 +211,9 @@ while true; do
         15) ping_multi "$RIGHT_CAN" 001 002 003 004 005 006 007 ;;
         16) ping_multi "$LEFT_CAN" 001 002 003 004 005 006 007 ;;
         17) ping_all_buses ;;
+        18) quick_check "both" ;;
+        19) quick_check "right" ;;
+        20) quick_check "left" ;;
         0)  echo "Bye!"; exit 0 ;;
         *)  echo "Invalid option"; sleep 1 ;;
     esac
