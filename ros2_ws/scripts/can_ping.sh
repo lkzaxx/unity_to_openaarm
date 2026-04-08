@@ -1,10 +1,19 @@
 #!/bin/bash
 # Interactive CAN motor ping tool
 # Reads /tmp/can_arm_map for arm-to-interface mapping
-# Usage: ./can_ping.sh
+#
+# Usage:
+#   ./can_ping.sh           # 互動選單
+#   ./can_ping.sh --right   # 快速檢查右臂，只顯示不通的
+#   ./can_ping.sh --left    # 快速檢查左臂，只顯示不通的
+#   ./can_ping.sh --both    # 快速檢查兩臂，只顯示不通的
+#   ./can_ping.sh -r        # 同 --right
+#   ./can_ping.sh -l        # 同 --left
+#   ./can_ping.sh -b        # 同 --both
 
 PING_DATA="FFFFFFFFFFFFFFFC"
 INTERVAL=0.5
+JOINT_NAMES=("J1(肩)" "J2(肩)" "J3(肘)" "J4(肘)" "J5(腕)" "J6(腕)" "J7(腕)")
 
 # Load mapping from cansetup.sh
 if [ -f /tmp/can_arm_map ]; then
@@ -123,7 +132,59 @@ ping_all_buses() {
     trap - INT
 }
 
-# --- Main loop ---
+# --- Quick check: ping one arm, only show failures ---
+quick_check_arm() {
+    local arm_name=$1
+    local bus=$2
+    local ids=(001 002 003 004 005 006 007)
+    local recv_ids=(011 012 013 014 015 016 017)
+    local all_ok=true
+
+    echo "=== $arm_name ($bus) ==="
+    for i in "${!ids[@]}"; do
+        local sid=${ids[$i]}
+        local rid=${recv_ids[$i]}
+        # 送 enable，用 candump 等 0.3 秒收回應
+        local resp
+        resp=$(timeout 0.3 bash -c "candump $bus,$rid:7FF -n 1 2>/dev/null & sleep 0.05; cansend $bus ${sid}#${PING_DATA} 2>/dev/null; wait" 2>&1)
+        if echo "$resp" | grep -q "$rid"; then
+            : # OK, 不印
+        else
+            echo "  ❌ ${JOINT_NAMES[$i]} (#$sid) — no response"
+            all_ok=false
+        fi
+    done
+    if $all_ok; then
+        echo "  ✅ All 7 motors OK"
+    fi
+}
+
+quick_check() {
+    local mode=$1
+    if [ "$mode" = "right" ] || [ "$mode" = "both" ]; then
+        quick_check_arm "Right Arm" "$RIGHT_CAN"
+    fi
+    if [ "$mode" = "left" ] || [ "$mode" = "both" ]; then
+        quick_check_arm "Left Arm" "$LEFT_CAN"
+    fi
+}
+
+# --- Command line arguments ---
+case "${1:-}" in
+    --right|-r) quick_check "right"; exit 0 ;;
+    --left|-l)  quick_check "left";  exit 0 ;;
+    --both|-b)  quick_check "both";  exit 0 ;;
+    --help|-h)
+        echo "Usage: $0 [--right|-r] [--left|-l] [--both|-b]"
+        echo "  No args: interactive menu"
+        echo "  --right/-r: quick check right arm"
+        echo "  --left/-l:  quick check left arm"
+        echo "  --both/-b:  quick check both arms"
+        exit 0
+        ;;
+esac
+
+# --- Main loop (interactive) ---
 while true; do
     show_menu
     read -rp "Select> " choice
