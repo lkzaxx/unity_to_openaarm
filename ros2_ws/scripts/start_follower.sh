@@ -11,7 +11,7 @@
 
 set -e
 
-# 設定 DISPLAY 環境變數 (nvarguscamerasrc 需要)
+# 設定 DISPLAY 環境變數 (RViz2、cv2.imshow 等 GUI 應用需要)
 export DISPLAY=:0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -178,17 +178,29 @@ echo "TCP Endpoint PID: $TCP_PID"
 # 5. 等待 TCP Endpoint 啟動
 sleep 2
 
-# 6. 啟動 Camera Publisher (背景執行，使用系統 Python 以支援 GStreamer)
-# 必須在啟用 venv 之前執行，因為 venv 的 OpenCV 可能沒有 GStreamer 支援
+# 6. 啟動 Camera Publisher (背景執行，RealSense D435i via pyrealsense2)
 echo ""
-echo "[Step 6] Starting Camera Publisher (background)..."
+echo "[Step 6] Starting RealSense D435i Camera Publisher (background)..."
 python3 "$ROS2_WS/src/openarm_ros2/openarm_bringup/scripts/camera_publisher.py" \
-    --ros-args -p use_test_pattern:=false -p jpeg_quality:=50 &
+    --ros-args -p use_test_pattern:=false -p jpeg_quality:=50 -p fps:=30 -p align_depth:=true &
 CAMERA_PID=$!
 echo "Camera Publisher PID: $CAMERA_PID"
 
 # 等待相機初始化
 sleep 2
+
+# 設定 trap：無論 Ctrl+C 或正常結束，都確保清理背景程序
+cleanup() {
+    echo ""
+    echo "Shutting down..."
+    deactivate 2>/dev/null || true
+    kill $CAMERA_PID 2>/dev/null || true
+    wait $CAMERA_PID 2>/dev/null || true
+    kill $TCP_PID 2>/dev/null || true
+    wait $TCP_PID 2>/dev/null || true
+    echo "Shutdown complete."
+}
+trap cleanup EXIT
 
 # 7. 啟用虛擬環境 (僅供 unity_interface_follower 使用)
 echo ""
@@ -200,11 +212,3 @@ echo ""
 echo "[Step 8] Starting Unity Follower Interface..."
 echo ""
 python3 "$ROS2_WS/src/openarm_ros2/openarm_bringup/scripts/unity_interface_follower.py"
-
-# 清理
-echo ""
-echo "Shutting down..."
-deactivate 2>/dev/null || true
-kill $CAMERA_PID 2>/dev/null || true
-kill $TCP_PID 2>/dev/null || true
-echo "Shutdown complete."
