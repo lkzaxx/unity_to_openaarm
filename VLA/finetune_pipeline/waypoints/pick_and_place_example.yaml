@@ -1,0 +1,73 @@
+# OpenArm Pick-and-Place Waypoint 範例
+#
+# 使用方式：
+#   1. 先用 calibrate 模式標定你自己的 waypoints：
+#      python3 waypoint_collector.py calibrate -a R -o waypoints/pick_and_place.yaml
+#
+#   2. 或以本檔案為模板，手動修改角度值
+#
+# joints: 7 個關節角度 (rad)，順序為 [J1, J2, J3, J4, J5, J6, J7]
+# gripper: open / close / 0.0~1.0 (到達此 waypoint 後執行)
+# duration: 從前一個 waypoint 到此 waypoint 的時間 (秒)
+# randomize: 可選的隨機擾動範圍
+#   joints: 每個關節的 ± 擾動 (rad)
+#   duration: 時間的 ± 擾動 (秒)
+
+arm: R
+task: "pick up the object from the table and place it in the box"
+record_fps: 30
+
+waypoints:
+  - name: home
+    joints: [0.0, 0.0, 0.0, 1.22, 0.0, 0.0, 0.0]
+    gripper: open
+    duration: 1.5
+
+  - name: approach
+    joints: [0.13, 0.30, 0.0, 0.80, 0.0, 0.0, 0.0]
+    gripper: open
+    duration: 2.0
+    randomize:
+      joints: [0.03, 0.02, 0.01, 0.02, 0.01, 0.01, 0.02]
+
+  - name: pre_grasp
+    joints: [0.13, 0.50, 0.0, 0.60, 0.0, 0.0, 0.0]
+    gripper: open
+    duration: 1.5
+    randomize:
+      joints: [0.03, 0.02, 0.01, 0.02, 0.01, 0.01, 0.02]
+
+  - name: grasp
+    joints: [0.13, 0.50, 0.0, 0.60, 0.0, 0.0, 0.0]
+    gripper: close
+    duration: 0.5
+
+  - name: lift
+    joints: [0.13, 0.20, 0.0, 0.80, 0.0, 0.0, 0.0]
+    gripper: close
+    duration: 1.5
+    randomize:
+      joints: [0.01, 0.02, 0.0, 0.02, 0.0, 0.0, 0.0]
+      duration: 0.3
+
+  - name: transport
+    joints: [-0.50, 0.20, 0.0, 0.80, 0.0, 0.0, 0.0]
+    gripper: close
+    duration: 2.0
+    randomize:
+      joints: [0.05, 0.02, 0.01, 0.02, 0.01, 0.01, 0.02]
+
+  - name: release
+    joints: [-0.50, 0.40, 0.0, 0.60, 0.0, 0.0, 0.0]
+    gripper: open
+    duration: 1.0
+
+  - name: retreat
+    joints: [-0.50, 0.20, 0.0, 0.80, 0.0, 0.0, 0.0]
+    gripper: open
+    duration: 1.0
+
+  - name: home_return
+    joints: [0.0, 0.0, 0.0, 1.22, 0.0, 0.0, 0.0]
+    gripper: open
+    duration: 2.0
