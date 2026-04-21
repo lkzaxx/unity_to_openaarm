@@ -101,7 +101,7 @@ GRIPPER_RECV_ID = 0x18
 #   - L_EE / R_EE 命令 → 控制夾爪
 #   - L_F1~L_F6 / R_F1~R_F6 命令 → 控制靈巧手
 ENABLE_GRIPPER = True         # 啟用夾爪控制
-ENABLE_DEXTEROUS_HAND = True  # 需保持 True 讓 ZLGCAN 初始化（SYNC_GRIPPER_TO_EHAND 需要）
+ENABLE_DEXTEROUS_HAND = False  # 需保持 True 讓 ZLGCAN 初始化（SYNC_GRIPPER_TO_EHAND 需要）
 ENABLE_EHAND_SUBSCRIPTION = False  # 訂閱 /unity/ehand_commands — 目前用 SYNC_GRIPPER_TO_EHAND 代替
 
 # 靈巧手配置（使用 USB CANFD DEBUG 設備 via ZLGCAN SDK）
@@ -202,7 +202,7 @@ USE_RUCKIG_SMOOTHING = True
 # [TEMP] 夾爪連動靈巧手：夾爪 L_EE/R_EE 同步控制靈巧手張合
 # True = 夾爪關閉時手也握，夾爪打開時手也張
 # 不需要時改為 False 即可停用
-SYNC_GRIPPER_TO_EHAND = True
+SYNC_GRIPPER_TO_EHAND = False
 SYNC_GRIPPER_THRESHOLD = 0.02  # 夾爪值 < 此值視為「關閉」(單位: meters, 0=關 0.0425=開)
 
 # [TEMP DEMO] 鎖定特定關節到固定角度（不需要時改為空 dict）

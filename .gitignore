@@ -107,3 +107,10 @@ yolov8n.pt
 openclaw-backup-*.tgz
 openclaw-src-extras-*.tgz
 openclaw_src_staging/
+
+# JointDataLogger output
+ros2_ws/src/openarm_ros2/openarm_bringup/scripts/utils/joint_data_*.pkl
+
+# Codex / openclaw misc
+.codex/
+.openclaw-version-pin
