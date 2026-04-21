@@ -25,9 +25,9 @@ echo "=============================================="
 # 0. 清理殘留程序
 echo ""
 echo "[Step 0] Cleaning up residual processes..."
-PROCS_TO_KILL="ros_tcp_endpoint|unity_interface_follower|camera_publisher"
+PROCS_TO_KILL="ros_tcp_endpoint|unity_interface_follower|camera_publisher|web_video_server"
 KILLED=0
-for proc in ros_tcp_endpoint unity_interface_follower camera_publisher; do
+for proc in ros_tcp_endpoint unity_interface_follower camera_publisher web_video_server; do
     if pkill -f "$proc" 2>/dev/null; then
         echo "  Killed residual: $proc"
         KILLED=$((KILLED + 1))
@@ -189,11 +189,21 @@ echo "Camera Publisher PID: $CAMERA_PID"
 # 等待相機初始化
 sleep 2
 
+# 6.5 啟動 web_video_server (ROS2 image topic → MJPEG HTTP :8080 供瀏覽器觀看)
+echo ""
+echo "[Step 6.5] Starting web_video_server (MJPEG HTTP :8080)..."
+ros2 run web_video_server web_video_server --ros-args -p port:=8080 -p address:=0.0.0.0 >/tmp/web_video_server.log 2>&1 &
+WVS_PID=$!
+echo "web_video_server PID: $WVS_PID  →  http://<jetson-ip>:8080/stream?topic=/camera/color/compressed"
+sleep 1
+
 # 設定 trap：無論 Ctrl+C 或正常結束，都確保清理背景程序
 cleanup() {
     echo ""
     echo "Shutting down..."
     deactivate 2>/dev/null || true
+    kill $WVS_PID 2>/dev/null || true
+    wait $WVS_PID 2>/dev/null || true
     kill $CAMERA_PID 2>/dev/null || true
     wait $CAMERA_PID 2>/dev/null || true
     kill $TCP_PID 2>/dev/null || true
