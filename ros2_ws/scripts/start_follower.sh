@@ -25,9 +25,9 @@ echo "=============================================="
 # 0. 清理殘留程序
 echo ""
 echo "[Step 0] Cleaning up residual processes..."
-PROCS_TO_KILL="ros_tcp_endpoint|unity_interface_follower|camera_publisher|web_video_server"
+PROCS_TO_KILL="ros_tcp_endpoint|unity_interface_follower|camera_publisher|web_video_server|topic_tools"
 KILLED=0
-for proc in ros_tcp_endpoint unity_interface_follower camera_publisher web_video_server; do
+for proc in ros_tcp_endpoint unity_interface_follower camera_publisher web_video_server topic_tools; do
     if pkill -f "$proc" 2>/dev/null; then
         echo "  Killed residual: $proc"
         KILLED=$((KILLED + 1))
@@ -189,12 +189,26 @@ echo "Camera Publisher PID: $CAMERA_PID"
 # 等待相機初始化
 sleep 2
 
-# 6.5 啟動 web_video_server (ROS2 image topic → MJPEG HTTP :8080 供瀏覽器觀看)
+# 6.5 topic_tools relay: rename /camera/*/compressed -> /camera/*/image_raw/compressed
+#      so web_video_server recognises them as CompressedImage transports.
 echo ""
-echo "[Step 6.5] Starting web_video_server (MJPEG HTTP :8080)..."
+echo "[Step 6.5] Starting topic_tools relays for camera streams..."
+ros2 run topic_tools relay /camera/color/compressed /camera/color/image_raw/compressed >/tmp/relay_color.log 2>&1 &
+RELAY_COLOR_PID=$!
+ros2 run topic_tools relay /camera/left/compressed /camera/left/image_raw/compressed >/tmp/relay_left.log 2>&1 &
+RELAY_LEFT_PID=$!
+ros2 run topic_tools relay /camera/right/compressed /camera/right/image_raw/compressed >/tmp/relay_right.log 2>&1 &
+RELAY_RIGHT_PID=$!
+echo "relays: color=$RELAY_COLOR_PID, left=$RELAY_LEFT_PID, right=$RELAY_RIGHT_PID"
+sleep 1
+
+# 6.6 web_video_server: ROS2 image topic -> MJPEG HTTP :8080
+echo ""
+echo "[Step 6.6] Starting web_video_server (MJPEG HTTP :8080)..."
 ros2 run web_video_server web_video_server --ros-args -p port:=8080 -p address:=0.0.0.0 >/tmp/web_video_server.log 2>&1 &
 WVS_PID=$!
-echo "web_video_server PID: $WVS_PID  →  http://<jetson-ip>:8080/stream?topic=/camera/color/compressed"
+echo "web_video_server PID: $WVS_PID"
+echo "  color: http://<jetson>:8080/stream?topic=/camera/color/image_raw&type=ros_compressed"
 sleep 1
 
 # 設定 trap：無論 Ctrl+C 或正常結束，都確保清理背景程序
@@ -204,6 +218,8 @@ cleanup() {
     deactivate 2>/dev/null || true
     kill $WVS_PID 2>/dev/null || true
     wait $WVS_PID 2>/dev/null || true
+    kill $RELAY_COLOR_PID $RELAY_LEFT_PID $RELAY_RIGHT_PID 2>/dev/null || true
+    wait $RELAY_COLOR_PID $RELAY_LEFT_PID $RELAY_RIGHT_PID 2>/dev/null || true
     kill $CAMERA_PID 2>/dev/null || true
     wait $CAMERA_PID 2>/dev/null || true
     kill $TCP_PID 2>/dev/null || true
